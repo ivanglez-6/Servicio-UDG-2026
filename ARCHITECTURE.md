@@ -614,7 +614,7 @@ POST /exportar_dicom
 | GET | `/hu_value` | Get HU value at (x,y,z) | JSON: {voxel, hu, scales} |
 | GET | `/get_histogram` | Get volume histogram (modality-aware) | JSON: {counts, bin_edges, modality, segments} |
 | GET | `/get_dicom_metadata` | Get technical metadata | JSON |
-| GET | `/get_viewer_config` | Get modality + windowing config for frontend init | JSON: {modality, initial_wc, initial_ww, display_min, display_max} |
+| GET | `/get_viewer_config` | Get modality + windowing + orientation config for frontend init | JSON: {modality, initial_wc, initial_ww, display_min, display_max, orientation_labels} |
 | POST | `/update_render_mode` | Change 3D rendering mode/cmap | JSON status |
 | POST | `/upload_RT` | Upload RT Structure (.nrrd) | JSON status |
 
@@ -828,10 +828,9 @@ contrastState = {
 - All views (2D + 3D) refresh automatically on completion
 
 **9. Anatomical Orientation Labels**
-- Fixed labels on each 2D view indicating anatomical directions:
-  - Axial: A (Anterior), P (Posterior), I (Izquierda), D (Derecha)
-  - Sagittal: S (Superior), Inf (Inferior), A (Anterior), P (Posterior)
-  - Coronal: S (Superior), Inf (Inferior), I (Izquierda), D (Derecha)
+- Each 2D view shows anatomical edge labels (R/L/A/P/S/I) computed dynamically from the DICOM `ImageOrientationPatient` tag.
+- Backend: `compute_orientation_labels(iop)` in `main.py` derives row/col/normal vectors, maps dominant cosine axis to LPS labels, returns `{top, bottom, left, right}` for all three views. Delivered via `/get_viewer_config`.
+- Frontend: `fetchViewerConfig()` populates the label `<div>` elements by ID on page load. If IOP is absent from the DICOM, labels are omitted silently.
 
 ---
 

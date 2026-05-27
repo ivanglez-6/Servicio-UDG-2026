@@ -407,24 +407,12 @@
                         <div class="minimap-viewport" id="minimap_viewport_{{ view }}"></div>
                     </div>
 
-                    <!-- Anatomical Orientation Labels -->
+                    <!-- Anatomical Orientation Labels (populated dynamically from DICOM IOP) -->
                     <div class="orientation-labels">
-                        {% if view == 'axial' %}
-                            <div class="orientation-label label-top">A</div>
-                            <div class="orientation-label label-bottom">P</div>
-                            <div class="orientation-label label-left">I</div>
-                            <div class="orientation-label label-right">D</div>
-                        {% elif view == 'sagital' %}
-                            <div class="orientation-label label-top">S</div>
-                            <div class="orientation-label label-bottom">Inf</div>
-                            <div class="orientation-label label-left">A</div>
-                            <div class="orientation-label label-right">P</div>
-                        {% elif view == 'coronal' %}
-                            <div class="orientation-label label-top">S</div>
-                            <div class="orientation-label label-bottom">Inf</div>
-                            <div class="orientation-label label-left">I</div>
-                            <div class="orientation-label label-right">D</div>
-                        {% endif %}
+                        <div class="orientation-label label-top"    id="label_top_{{ view }}"></div>
+                        <div class="orientation-label label-bottom" id="label_bottom_{{ view }}"></div>
+                        <div class="orientation-label label-left"   id="label_left_{{ view }}"></div>
+                        <div class="orientation-label label-right"  id="label_right_{{ view }}"></div>
                     </div>
                 </div>
                 {% else %}

@@ -2144,6 +2144,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 ];
                 computeAndUpdateLUT();
                 applyModalityUI();
+
+                if (data.orientation_labels) {
+                    ['axial', 'coronal', 'sagital'].forEach(view => {
+                        const labels = data.orientation_labels[view];
+                        if (!labels) return;
+                        ['top', 'bottom', 'left', 'right'].forEach(pos => {
+                            const el = document.getElementById(`label_${pos}_${view}`);
+                            if (el) el.textContent = labels[pos] ?? '';
+                        });
+                    });
+                }
             })
             .catch(() => {}); // Silent fail — CT defaults remain active
     }

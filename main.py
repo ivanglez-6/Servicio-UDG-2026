@@ -348,6 +348,63 @@ def _slice_2d_and_target_size(view, index, user_data):
     else: return None, None, None
     return img, max(1, int(w)), max(1, int(h))
 
+# DICOM LPS patient coordinate system: X+=Left, Y+=Posterior, Z+=Superior.
+_AXIS_LABELS = {
+    0: ('L', 'R'),  # X+ → Left (patient),  X- → Right
+    1: ('P', 'A'),  # Y+ → Posterior,        Y- → Anterior
+    2: ('S', 'I'),  # Z+ → Superior,         Z- → Inferior
+}
+
+def _cosine_to_label(v):
+    """Return the anatomical direction label for a 3-element LPS cosine vector."""
+    v = list(v)
+    dominant = max(range(3), key=lambda i: abs(v[i]))
+    pos_label, neg_label = _AXIS_LABELS[dominant]
+    return pos_label if v[dominant] >= 0 else neg_label
+
+def compute_orientation_labels(iop):
+    """
+    Given ImageOrientationPatient (6 floats: row_cos[3] + col_cos[3]),
+    return edge labels for all three standard MPR views.
+
+    row vector: goes left→right across the image plane.
+    col vector: goes top→bottom down the image plane.
+    normal = row × col: points along the slice-stack axis (first slice → last slice).
+
+    Radiological convention for axial/coronal: left of screen = patient's right.
+    Volume is sorted ascending by InstanceNumber; for typical HFS acquisitions
+    the stack direction is head→feet, so normal[2]>0 (Z+) maps to superior-at-top
+    in coronal/sagittal without sign inversion.
+    """
+    row = iop[:3]
+    col = iop[3:]
+    normal = [
+        row[1]*col[2] - row[2]*col[1],
+        row[2]*col[0] - row[0]*col[2],
+        row[0]*col[1] - row[1]*col[0],
+    ]
+    neg = lambda v: [-x for x in v]
+
+    return {
+        # vol[z, :, :] → displayed as (Y rows top→bottom, X cols left→right)
+        # Radiological: left of image = patient right → neg(row) at left, row at right
+        'axial':   {'top':    _cosine_to_label(neg(col)),
+                    'bottom': _cosine_to_label(col),
+                    'left':   _cosine_to_label(neg(row)),
+                    'right':  _cosine_to_label(row)},
+        # vol[:, y, :] → displayed as (Z rows top→bottom, X cols left→right)
+        # vol index 0 = first InstanceNumber = most superior for HFS → top = normal direction
+        'coronal': {'top':    _cosine_to_label(normal),
+                    'bottom': _cosine_to_label(neg(normal)),
+                    'left':   _cosine_to_label(neg(row)),
+                    'right':  _cosine_to_label(row)},
+        # vol[:, :, x] → displayed as (Z rows top→bottom, Y cols left→right)
+        'sagital': {'top':    _cosine_to_label(normal),
+                    'bottom': _cosine_to_label(neg(normal)),
+                    'left':   _cosine_to_label(neg(col)),
+                    'right':  _cosine_to_label(col)},
+    }
+
 def process_dicom_folder(directory, user_data):
     """Lee una carpeta de archivos, los agrupa por series y extrae metadatos clave."""
     dicom_series = defaultdict(lambda: {
@@ -375,6 +432,8 @@ def process_dicom_folder(directory, user_data):
                 series["PixelSpacing"] = dicom_data.PixelSpacing
                 series["SliceThickness"] = dicom_data.get("SliceThickness", 1)
                 series["Modality"] = str(getattr(dicom_data, 'Modality', 'CT'))
+                iop_raw = getattr(dicom_data, 'ImageOrientationPatient', None)
+                series["ImageOrientationPatient"] = [float(x) for x in iop_raw] if iop_raw is not None else None
                 # WindowCenter/WindowWidth may hold multiple presets (MultiValue); always take the first.
                 _wc = getattr(dicom_data, 'WindowCenter', None)
                 _ww = getattr(dicom_data, 'WindowWidth', None)
@@ -501,12 +560,16 @@ def process_selected_dicom():
     else:
         initial_wc, initial_ww = auto_wc, auto_ww
 
+    iop = series_meta.get('ImageOrientationPatient')
+    orientation_labels = compute_orientation_labels(iop) if iop is not None else None
+
     user_data.update({
-        'modality':    modality,
-        'initial_wc':  initial_wc,
-        'initial_ww':  initial_ww,
-        'display_min': display_min,
-        'display_max': display_max,
+        'modality':           modality,
+        'initial_wc':         initial_wc,
+        'initial_ww':         initial_ww,
+        'display_min':        display_min,
+        'display_max':        display_max,
+        'orientation_labels': orientation_labels,
     })
     # ---------------------------------------------------------
 
@@ -664,11 +727,12 @@ def get_viewer_config():
     if not all(k in user_data for k in required):
         return jsonify({"error": "No volume loaded"}), 400
     return jsonify({
-        'modality':    user_data['modality'],
-        'initial_wc':  user_data['initial_wc'],
-        'initial_ww':  user_data['initial_ww'],
-        'display_min': user_data['display_min'],
-        'display_max': user_data['display_max'],
+        'modality':           user_data['modality'],
+        'initial_wc':         user_data['initial_wc'],
+        'initial_ww':         user_data['initial_ww'],
+        'display_min':        user_data['display_min'],
+        'display_max':        user_data['display_max'],
+        'orientation_labels': user_data.get('orientation_labels'),
     })
 
 @app.route('/update_render_mode', methods=['POST'])
