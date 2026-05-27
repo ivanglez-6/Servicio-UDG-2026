@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+
+    <title>Servicio Social Imagenología</title>
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous">
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <!-- Estilos personalizados -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/udg_estilos.css') }}">
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+
+</head>
+<body>
+    <!-- Pantalla de carga 
+     
+    <div id="loader-wrapper">
+        <img id="loader-logo" src="{{ url_for('static', filename='img/leones_negros_logo.png') }}" alt="Logo Leones Negros">
+        <p class="text-light mt-3">Cargando...</p>
+    </div>
+    -->
+    <div id="loader-wrapper">
+        <div id="loader"></div>
+        <p class="text-light mt-3">Cargando...</p>
+    </div>
+
+    <!-- Barra de navegación -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark shadow">
+        <div class="container-fluid">
+            <a class="navbar-brand d-flex align-items-center px-2" href="{{ url_for('home') }}" 
+            data-bs-toggle="tooltip" data-bs-placement="bottom">
+                <i class="bi bi-house-door-fill" style="font-size: 1.5rem; color: var(--amarillo-UDG);"></i>
+                <span class="ms-2 d-none d-md-block" style="font-size: 0.9rem; color: var(--gris-texto); font-weight: normal;">INICIO</span>
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"
+                    aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+                    <li class="nav-item">
+                        <a class="nav-link text-light" href="{{ url_for('loadDicom') }}">
+                            <i class="bi bi-upload"></i> Subir Imagen
+                        </a>
+                    </li>
+                    <!--<li class="nav-item">
+                        <a class="nav-link text-light" href="{{ url_for('anonimize') }}">
+                            <i class="bi bi-shield-lock"></i> Anonimizar
+                        </a>
+                    </li> -->
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle text-light" href="#" role="button" data-bs-toggle="dropdown"
+                           aria-expanded="false">
+                            <i class="bi bi-eye"></i> Visualización
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="{{ url_for('render', render='dicom') }}">Visualizar Imagen</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="#">Guardar RT Struct</a></li>
+                        </ul>
+                    </li>
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle text-light" href="#" role="button" data-bs-toggle="dropdown"
+                           aria-expanded="false">
+                            <i class="bi bi-gear"></i> Opciones
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="#">Cargar Imagen</a></li>
+                            <li><a class="dropdown-item" href="#">Generar RT Struct</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="#">Información</a></li>
+                        </ul>
+                    </li>
+                </ul>
+                <form class="d-flex">
+                    <input class="form-control me-2" type="search" placeholder="Buscar..." aria-label="Search">
+                    <button class="btn btn-outline-secondary" type="submit"><i class="bi bi-search"></i></button>
+                </form>
+                <div class="d-flex align-items-center ms-3">
+                    {% if user_logged_in %}
+                    <!-- Usuario logueado: círculo verde con iniciales -->
+                    <div class="dropdown">
+                        <button class="btn btn-success rounded-circle d-flex justify-content-center align-items-center"
+                                id="userMenuButton" type="button" data-bs-toggle="dropdown" aria-expanded="false"
+                                style="width: 40px; height: 40px; font-weight: bold; color: white; user-select: none;">
+                        {{ user_initials }}
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userMenuButton">
+                        <li><a class="dropdown-item" href="/profile">Perfil</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="/logout">Cerrar sesión</a></li>
+                        </ul>
+                    </div>
+                    {% else %}
+                    <!-- Usuario no logueado: círculo gris con icono de usuario -->
+                    <div class="dropdown">
+                        <button class="btn btn-secondary rounded-circle d-flex justify-content-center align-items-center"
+                                id="loginMenuButton" type="button" data-bs-toggle="dropdown" aria-expanded="false"
+                                style="width: 40px; height: 40px; color: white;">
+                        <i class="bi bi-person-fill"></i>
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="loginMenuButton">
+                        <li><a class="dropdown-item" href="/login">Iniciar sesión</a></li>
+                        <li><a class="dropdown-item" href="/register">Registrarse</a></li>
+                        </ul>
+                    </div>
+                    {% endif %}
+                </div>
+  
+            </div>
+        </div>
+    </nav>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <div class="container mt-3">
+        {% for category, message in messages %}
+            <div class="alert alert-{{ 'danger' if category=='danger' else category }} alert-dismissible fade show" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        {% endfor %}
+        </div>
+    {% endif %}
+    {% endwith %}
+
+
+    <!-- Contenido principal -->
+    {% block main_container %}
+    <div class="container mt-4 text-center">
+        <div class="card shadow p-4">
+            {% block content %}
+            {% endblock %}
+        </div>
+    </div>
+    {% endblock main_container %}
+
+    <!-- Script para ocultar la pantalla de carga -->
+    <script>
+        window.addEventListener("load", function () {
+            const loader = document.getElementById("loader-wrapper");
+            if (loader) {
+                loader.style.opacity = '0';
+                setTimeout(() => {
+                    loader.style.display = 'none';
+                }, 500);
+            }
+        });
+    </script>
+</body>
+</html>

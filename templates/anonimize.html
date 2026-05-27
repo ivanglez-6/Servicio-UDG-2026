@@ -1,0 +1,144 @@
+{% extends "home.html" %}
+
+{% block content %}
+{% if success == 1 %}
+
+<div class="container mt-4">
+    <h2 class="text-center text-light fw-bold mb-4">Anonimización de Datos</h2>
+    
+    <div id="tabla-container" class="table-responsive">
+        <table class="table table-borderless mb-0">
+            <thead>
+                <tr>
+                    <th class="text-center" style="width: 30%;">CAMPO</th>
+                    <th class="text-center" style="width: 50%;">VALOR NUEVO</th>
+                    <th class="text-center" style="width: 20%;">ACCIÓN</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for field, value in dicom_series.items() %}
+                    <tr class="section-header">
+                        <td colspan="3">
+                            <div class="d-flex align-items-center justify-content-center">
+                                <i class="bi bi-tag-fill me-2"></i> {{ field }}
+                            </div>
+                        </td>
+                    </tr>
+                    
+                    <tr class="data-row" id="row_{{ field }}">
+                        <td class="text-end align-middle pe-4" style="color: #888;">
+                            <small>Original: <span class="text-info fw-bold fst-italic ms-1">{{ value }}</span></small>
+                        </td>
+                        
+                        <td class="align-middle">
+                            <input type="text" class="form-control form-control-sm"
+                                name="{{ unique_id }}_{{ field }}"
+                                data-uid="{{ unique_id }}"
+                                data-field="{{ field }}"
+                                value="Anonimo" 
+                                placeholder="Escribe el nuevo valor">
+                        </td>
+                        
+                        <td class="text-center align-middle">
+                            <button type="button" class="btn btn-outline-danger btn-sm" onclick="excluirCampo('{{ field }}')">
+                                <i class="bi bi-x"></i> Excluir
+                            </button>
+                        </td>
+                    </tr>
+                    <tr class="spacer-row"><td colspan="3"></td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div id="botones-container" class="d-flex justify-content-center gap-3 mt-4">
+        <a href="{{ url_for('render', render='dicom') }}" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Volver
+        </a>
+        <button type="button" class="btn btn-primary" onclick="guardarCambios()">
+            <i class="bi bi-save"></i> Guardar Cambios
+        </button>
+        <button type="button" class="btn btn-udg" onclick="exportarDicom()">
+            <i class="bi bi-download"></i> Exportar DICOM
+        </button>
+    </div>
+    
+    <div id="mensaje-todos-excluidos" class="hidden text-center mt-5">
+        <h3 class="text-muted">No hay campos para mostrar.</h3>
+    </div>
+</div>
+
+{% else %}
+    <div class="text-center mt-5">
+        <h1 class="text-light">Carga primero un archivo</h1>
+    </div>
+{% endif %}
+
+<script>
+    function excluirCampo(field) {
+        const row = document.getElementById(`row_${field}`);
+        // Buscamos el encabezado anterior a la fila (el tr con clase section-header)
+        const header = row.previousElementSibling; 
+        const spacer = row.nextElementSibling;
+
+        if(row) row.remove();
+        if(header && header.classList.contains('section-header')) header.remove();
+        if(spacer && spacer.classList.contains('spacer-row')) spacer.remove();
+
+        verificarCamposRestantes();
+    }
+
+    function verificarCamposRestantes() {
+        const filas = document.querySelectorAll('.data-row');
+        if (filas.length === 0) {
+            document.getElementById("tabla-container").style.display = 'none';
+            document.getElementById("botones-container").style.display = 'none';
+            document.getElementById("mensaje-todos-excluidos").classList.remove("hidden");
+        }
+    }
+
+    function guardarCambios() {
+        let cambiosAnonimizacion = {};
+        document.querySelectorAll('input[type="text"]').forEach(input => {
+            const field = input.dataset.field;
+            const nuevoValor = input.value.trim();
+            if (nuevoValor !== "") {
+                cambiosAnonimizacion[field] = nuevoValor;
+            }
+        });
+
+        const token = document.querySelector('meta[name="csrf-token"]').content;
+        
+        // Feedback visual temporal
+        const btn = document.querySelector('.btn-primary');
+        const original = btn.innerHTML;
+        btn.innerHTML = 'Guardando...';
+        
+        fetch('/guardar_cambios', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+            body: JSON.stringify({ cambios: cambiosAnonimizacion }),
+        })
+        .then(response => response.json())
+        .then(() => alert("Cambios guardados correctamente."))
+        .catch(() => alert("Error al guardar."))
+        .finally(() => btn.innerHTML = original);
+    }
+
+    function exportarDicom() {
+        fetch('/exportar_dicom', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+        .then(response => response.blob())
+        .then(blob => {
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'archivos_anonimizados.zip';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+        })
+        .catch(() => alert("Error al exportar."));
+    }
+</script>
+{% endblock %}

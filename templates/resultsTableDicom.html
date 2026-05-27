@@ -1,0 +1,122 @@
+{% extends "home.html" %}
+
+{% block content %}
+    <div class="container mt-5 text-center">
+        <div class="card table-container-card">
+            <h1><i class="bi bi-list-check"></i> Resultados</h1>
+
+            <div class="table-responsive">
+                <table class="table udg-style table-hover">
+                    <thead>
+                        <tr>
+                            <th>Paciente</th>
+                            <th>Tipo</th>
+                            <th>Dimensiones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for unique_id, info in dicom_series.items() %}
+                        <tr id="{{ unique_id }}" onclick="selectRow('{{ unique_id }}')" class="clickable-row">
+                            <td>{{ info['paciente'] }}</td>
+                            <td><span class="badge bg-secondary">{{ info['tipo'] }}</span></td>
+                            <td class="font-monospace small">{{ info['dimensiones'] }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <div id="selectionContainer" class="mt-4 d-none fade-in">
+                <p id="selectedText" class="mb-3"></p>
+                
+                <div class="d-flex justify-content-center gap-3">
+                    <button id="acceptButton" class="btn btn-udg px-4 py-2 shadow-sm" onclick="acceptSelection()">
+                        <i class="bi bi-check2-circle"></i> Cargar Paciente
+                    </button>
+
+                    <a id="visualizeButton" href="{{ url_for('render', render='dicom') }}" 
+                    class="btn btn-success px-4 py-2 fw-bold d-none shadow-sm">
+                        <i class="bi bi-eye-fill"></i> Ir al Visor
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let selectedId = null;  
+
+        function selectRow(unique_id) {
+            // 1. Estilo visual: Quitar activo de otros y poner al actual
+            document.querySelectorAll('.udg-style tbody tr').forEach(row => {
+                row.classList.remove('table-active-row');
+            });
+            document.getElementById(unique_id).classList.add('table-active-row');
+
+            // 2. Cargar Metadata
+            loadDicomMetadata(unique_id);
+        }
+
+        function loadDicomMetadata(unique_id) {
+            // Resetear botones si cambia de paciente
+            document.getElementById("visualizeButton").classList.add("d-none");
+            let acceptButton = document.getElementById("acceptButton");
+            acceptButton.disabled = false;
+            acceptButton.innerHTML = '<i class="bi bi-check-lg"></i> Cargar Paciente';
+            acceptButton.classList.remove("btn-success");
+            acceptButton.classList.add("btn-udg");
+
+            fetch(`/loadDicomMetadata/${unique_id}`)
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById("selectedText").innerHTML = 
+                        `Paciente seleccionado: <strong>${data.metadata}</strong>`;
+                    
+                    document.getElementById("selectionContainer").classList.remove("d-none");
+                    selectedId = unique_id;
+                })
+                .catch(error => console.error("Error:", error));
+        }
+
+        function acceptSelection() {
+            if (!selectedId) return;
+
+            let acceptButton = document.getElementById("acceptButton");
+            acceptButton.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Procesando...';
+            acceptButton.disabled = true;
+
+            const token = document.querySelector('meta[name="csrf-token"]').content;
+            
+            fetch('/process_selected_dicom', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': token
+                },
+                body: JSON.stringify({ unique_id: selectedId })
+            })
+            .then(response => response.json())
+            .then(data => {
+                // ÉXITO: Cambiar botón aceptar y MOSTRAR botón visualizar
+                acceptButton.innerHTML = '<i class="bi bi-check-circle"></i> Cargado';
+                acceptButton.classList.remove("btn-udg");
+                acceptButton.classList.add("btn-success"); // Verde temporal para indicar éxito
+                
+                // Mostrar el botón de ir al visor con animación
+                const vizBtn = document.getElementById("visualizeButton");
+                vizBtn.classList.remove("d-none");
+                vizBtn.classList.add("animate-fade-in");
+            })
+            .catch(error => {
+                console.error("Error:", error);
+                acceptButton.innerHTML = '<i class="bi bi-exclamation-triangle"></i> Error';
+                acceptButton.disabled = false;
+            });
+        }
+    </script>
+
+    <style>
+        .fade-in { animation: fadeIn 0.5s; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    </style>
+{% endblock %}

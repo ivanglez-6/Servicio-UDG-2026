@@ -1,0 +1,474 @@
+{% extends "home.html" %}
+
+{% block main_container %}
+{% block content %}
+
+<div id="viewer-wrapper">
+  <div id="viewer-container">
+
+    <div id="plugins-sidebar" class="d-flex flex-column p-3 border-end border-secondary" style="background-color: var(--gris-panel);">
+      <div class="sidebar-fixed-content">
+      
+        <div class="text-center mb-4">
+          <h6 class="text-light fw-bold text-uppercase" style="letter-spacing: 2px; font-size: 0.8rem;">
+              <i class="bi bi-grid-3x3-gap-fill text-primary"></i> Herramientas
+          </h6>
+        </div>
+        
+        <div class="sidebar-group">
+          <div class="sidebar-group-title">General</div>
+          <div class="d-flex flex-wrap justify-content-center gap-2">
+
+              <button id="inspectorPluginBtn" class="btn btn-secondary btn-icon shadow-sm"
+                      data-bs-toggle="tooltip" data-bs-placement="right"
+                      title="Inspector: Visualiza coordenadas y densidad.">
+                  <i class="bi bi-crosshair"></i>
+              </button>
+
+              <button id="windowLevelBtn" class="btn btn-secondary btn-icon shadow-sm"
+                      data-bs-toggle="tooltip" data-bs-placement="right" 
+                      title="Ajuste de Ventana y Nivel (Brillo/Contraste).">
+                  <i class="bi bi-brightness-high"></i>
+              </button>
+              
+              <a href="{{ url_for('anonimize') }}" class="btn btn-secondary btn-icon shadow-sm"
+                      data-bs-toggle="tooltip" data-bs-placement="right" 
+                      title="Módulo de Anonimización.">
+                  <i class="bi bi-shield-lock"></i>
+              </a>
+          </div>
+        </div>
+
+        <div class="sidebar-group">
+          <div class="sidebar-group-title">Segmentación</div>
+          <div class="d-flex flex-wrap justify-content-center gap-2">
+
+              <button id="rtStructPluginBtn" class="btn btn-secondary btn-icon shadow-sm"
+                      data-bs-toggle="tooltip" data-bs-placement="right"
+                      title="Cargar Segmentación.">
+                  <i class="bi bi-layers-half"></i>
+              </button>
+
+              <button id="segmentationToolBtn" class="btn btn-secondary btn-icon shadow-sm"
+                      data-bs-toggle="tooltip" data-bs-placement="right"
+                      title="Crear Segmentación (Pintar Vóxeles).">
+                  <i class="bi bi-brush"></i>
+              </button>
+
+              <button id="contrastEditorBtn" class="btn btn-secondary btn-icon shadow-sm"
+                      data-bs-toggle="tooltip" data-bs-placement="right"
+                      title="Editor de Histograma.">
+                  <i class="bi bi-graph-up"></i>
+              </button>
+          </div>
+        </div>
+
+        <div class="sidebar-group">
+          <div class="sidebar-group-title">Visualización 3D & Color</div>
+          
+          <div class="px-2 mb-3">
+            <label class="text-muted small mb-1">Mapa de Color</label>
+            <select id="colormapSelect" class="form-select form-select-sm bg-dark text-light border-secondary">
+                <option value="gray" selected>Escala de Grises</option>
+                <option value="bone">Hueso (Bone)</option>
+                <option value="jet">Arcoiris (Jet)</option>
+                <option value="hot">Térmico (Hot)</option>
+                <option value="magma">Magma</option>
+                <option value="Spectral">Espectral</option>
+            </select>
+          </div>
+
+          <div class="d-flex flex-column gap-2 mt-2 px-2">
+              <div class="form-check form-switch text-light small">
+                  <input class="form-check-input" type="radio" name="renderMode" id="modeIso" value="isosurface" {% if current_render_mode == 'isosurface' %}checked{% endif %}>
+                  <label class="form-check-label" for="modeIso">Isosurface</label>
+              </div>
+              <div class="form-check form-switch text-light small">
+                  <input class="form-check-input" type="radio" name="renderMode" id="modeMIP" value="mip" {% if current_render_mode == 'mip' %}checked{% endif %}>
+                  <label class="form-check-label" for="modeMIP">MIP (Proyección Máx.)</label>
+              </div>
+              
+              <div class="form-check form-switch text-light small">
+                  <input class="form-check-input" type="radio" name="renderMode" id="modeMIPInv" value="mip_inverted" {% if current_render_mode == 'mip_inverted' %}checked{% endif %}>
+                  <label class="form-check-label" for="modeMIPInv">MIP Invertido</label>
+              </div>
+              
+              <div class="form-check form-switch text-light small">
+                  <input class="form-check-input" type="radio" name="renderMode" id="modeVol" value="volume" {% if current_render_mode == 'volume' %}checked{% endif %}>
+                  <label class="form-check-label" for="modeVol">Volumétrico</label>
+              </div>
+          </div>
+        </div>
+
+        <div class="sidebar-group">
+          <div class="sidebar-group-title">Info. Técnica</div>
+          <div class="d-grid">
+              <button class="btn btn-outline-secondary btn-sm text-start" data-bs-toggle="modal" data-bs-target="#metadataModal">
+                  <i class="bi bi-info-circle text-primary me-2"></i> Ver Ficha Técnica
+              </button>
+          </div>
+        </div>
+        
+        <!-- Sección de IA - Nuevo plugin para segmentación automática -->
+        <div class="sidebar-group mt-3">
+            <div class="sidebar-group-title">Inteligencia Artificial</div>
+            <button id="runAiBtn" class="btn btn-sm btn-udg-dorado w-100 fw-bold shadow-udg">
+                <i class="bi bi-cpu"></i> Auto-Segmentar (Swin-UNETR)
+            </button>
+        </div>
+
+      </div> 
+      
+      <div id="active-tool-panel" class="flex-grow-1 pe-2" style="overflow-y: auto;">
+          
+          <div id="rtStructPluginContainer" style="display: none;" class="animate-fade-in">
+             <div class="tool-panel-title"><i class="bi bi-layers-half"></i> Segmentación</div>
+             <div class="text-light small mb-2">Cargar Archivo .nrrd</div>
+             <form id="rtStructForm" class="d-flex flex-column gap-2">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="file" name="file" accept=".nrrd" class="form-control form-control-sm" required>
+                <button type="submit" class="btn btn-sm btn-primary w-100 fw-bold">
+                    <i class="bi bi-upload"></i> Procesar
+                </button>
+             </form>
+          </div>
+
+          <div id="inspectorPluginContainer" style="display: none;" class="animate-fade-in">
+             <div class="tool-panel-title"><i class="bi bi-crosshair"></i> Inspector</div>
+             <div class="alert alert-dark border-secondary p-2">
+                 <small id="huInfo" class="text-info d-block mb-1"><i class="bi bi-info-circle"></i> Haz clic en la imagen.</small>
+                 <div id="huResult" class="fw-bold text-light" style="font-family: monospace;">-</div>
+             </div>
+          </div>
+
+          <div id="segmentationToolContainer" style="display: none;" class="animate-fade-in">
+             <div class="tool-panel-title"><i class="bi bi-brush"></i> Crear Segmentación</div>
+
+             <div id="segmentationsPanel" class="mb-2">
+               <div class="d-flex justify-content-between align-items-center mb-1">
+                 <span class="text-light small fw-bold">Capas <span id="segCountDisplay" class="text-muted">0/5</span></span>
+                 <button id="newSegmentationBtn" class="btn btn-outline-success btn-sm py-0 px-2" style="font-size: 0.75rem;">+ Nueva</button>
+               </div>
+               <div id="createSegmentationForm" style="display:none;" class="mb-2">
+                 <input type="text" id="newSegNameInput" class="form-control form-control-sm bg-dark text-light border-secondary mb-1" placeholder="Nombre de la segmentación">
+                 <div class="d-flex gap-1">
+                   <button id="saveNewSegBtn" class="btn btn-success btn-sm flex-grow-1">Guardar</button>
+                   <button id="cancelNewSegBtn" class="btn btn-secondary btn-sm flex-grow-1">Cancelar</button>
+                 </div>
+               </div>
+               <div id="segmentationsListContainer">
+                 <p class="text-muted small text-center mb-1">No hay segmentaciones. Crea una nueva.</p>
+               </div>
+             </div>
+             <hr class="border-secondary my-2">
+
+             <div class="alert alert-dark border-secondary p-2">
+                 <small id="segToolInfo" class="text-info d-block mb-1"><i class="bi bi-info-circle"></i> Selecciona herramienta.</small>
+             </div>
+
+             <div class="bg-secondary bg-opacity-25 p-2 rounded mb-2 border border-secondary">
+                 <label class="text-light small mb-2">Herramienta:</label>
+                 <div class="btn-group w-100" role="group">
+                     <input type="radio" class="btn-check" name="segTool" id="toolBrush" value="brush" checked autocomplete="off">
+                     <label class="btn btn-outline-light btn-sm" for="toolBrush">
+                         <i class="bi bi-brush"></i> Pincel
+                     </label>
+
+                     <input type="radio" class="btn-check" name="segTool" id="toolPolygon" value="polygon" autocomplete="off">
+                     <label class="btn btn-outline-light btn-sm" for="toolPolygon">
+                         <i class="bi bi-pentagon"></i> Polígono
+                     </label>
+                 </div>
+             </div>
+
+             <div id="brushControls" class="bg-secondary bg-opacity-25 p-2 rounded mb-2 border border-secondary">
+                 <label class="text-light small mb-2">Tamaño de Pincel:</label>
+                 <div class="form-check">
+                     <input class="form-check-input" type="radio" name="brushSize" id="brush1" value="1" checked>
+                     <label class="form-check-label text-light small" for="brush1">1 vóxel</label>
+                 </div>
+                 <div class="form-check">
+                     <input class="form-check-input" type="radio" name="brushSize" id="brush3" value="3">
+                     <label class="form-check-label text-light small" for="brush3">3 vóxeles</label>
+                 </div>
+                 <div class="form-check">
+                     <input class="form-check-input" type="radio" name="brushSize" id="brush5" value="5">
+                     <label class="form-check-label text-light small" for="brush5">5 vóxeles</label>
+                 </div>
+                 <div class="form-check">
+                     <input class="form-check-input" type="radio" name="brushSize" id="brush7" value="7">
+                     <label class="form-check-label text-light small" for="brush7">7 vóxeles</label>
+                 </div>
+             </div>
+
+             <div id="polygonControls" class="bg-secondary bg-opacity-25 p-2 rounded mb-2 border border-secondary" style="display: none;">
+                 <small class="text-light d-block mb-1">• Clic para agregar vértices</small>
+                 <small class="text-light d-block mb-1">• Clic cerca del primer punto para cerrar</small>
+                 <small class="text-light d-block mb-1">• ESC para cancelar</small>
+                 <small class="text-light d-block mb-1">• ← para deshacer vértice</small>
+                 <div class="mt-2">
+                     <span class="text-light small">Vértices: <span id="vertexCount">0</span></span>
+                 </div>
+             </div>
+
+             <button id="paintModeToggleBtn" class="btn btn-sm btn-success w-100">
+                 <i class="bi bi-brush-fill"></i> Modo: Pintar
+             </button>
+
+             <button id="undoLastPolygonBtn" class="btn btn-sm btn-outline-secondary w-100 mt-2" disabled>
+                 <i class="bi bi-arrow-counterclockwise"></i> Deshacer Último Polígono
+             </button>
+
+             <button id="clearActiveSegmentationBtn" class="btn btn-sm btn-outline-warning w-100 mt-2">
+                 <i class="bi bi-trash"></i> Borrar Activa
+             </button>
+
+             <button id="exportActiveSegBtn" class="btn btn-sm btn-primary w-100 mt-2">
+                 <i class="bi bi-download"></i> Exportar Activa
+             </button>
+             <button id="exportAllSegBtn" class="btn btn-sm btn-outline-primary w-100 mt-1">
+                 <i class="bi bi-download"></i> Exportar Todas
+             </button>
+          </div>
+
+          <div id="windowLevelControls" style="display: none;" class="animate-fade-in">
+            <div class="tool-panel-title"><i class="bi bi-brightness-high"></i> Brillo y Contraste</div>
+            
+            <div class="bg-secondary bg-opacity-25 p-2 rounded mb-2 border border-secondary">
+                <div class="row g-2 text-light small align-items-center mb-3">
+                  <div class="col-4 text-end text-muted">Nivel</div>
+                  <div class="col-8">
+                    <div class="input-group input-group-sm custom-spinner">
+                      <button class="btn btn-outline-secondary" type="button" id="levelInput-minus">-</button>
+                      <input type="number" id="levelInput" class="form-control text-center bg-dark text-light border-secondary" value="40">
+                      <button class="btn btn-outline-secondary" type="button" id="levelInput-plus">+</button>
+                    </div>
+                  </div>
+                  <div class="col-4 text-end text-muted">Ancho</div>
+                  <div class="col-8">
+                    <div class="input-group input-group-sm custom-spinner">
+                      <button class="btn btn-outline-secondary" type="button" id="windowInput-minus">-</button>
+                      <input type="number" id="windowInput" class="form-control text-center bg-dark text-light border-secondary" value="400">
+                      <button class="btn btn-outline-secondary" type="button" id="windowInput-plus">+</button>
+                    </div>
+                  </div>
+                </div>
+                
+                <hr class="border-secondary my-2">
+
+                <div class="mb-2">
+                    <div class="d-flex justify-content-between">
+                        <label for="wc_slider" class="form-label small text-light fw-bold mb-1">
+                            <i class="bi bi-circle-half"></i> Nivel
+                        </label>
+                        <span class="small text-muted" id="wc_val_display">40</span>
+                    </div>
+                    <input type="range" class="form-range" id="wc_slider" min="-1000" max="1000" value="40">
+                </div>
+                
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between">
+                        <label for="ww_slider" class="form-label small text-light fw-bold mb-1">
+                            <i class="bi bi-arrows-expand"></i> Ancho
+                        </label>
+                        <span class="small text-muted" id="ww_val_display">400</span>
+                    </div>
+                    <input type="range" class="form-range" id="ww_slider" min="1" max="4000" value="400">
+                </div>
+                
+                <label class="small text-muted mb-1">Preajustes:</label>
+                <div id="ctPresets" class="btn-group-presets mt-1" role="group">
+                    <button type="button" id="presetBtnLung" class="btn btn-sm btn-outline-secondary" title="Pulmón">
+                        <i class="bi bi-lungs"></i> Pulmón
+                    </button>
+                    <button type="button" id="presetBtnBone" class="btn btn-sm btn-outline-secondary" title="Hueso">
+                        <i class="bi bi-box"></i> Hueso
+                    </button>
+                    <button type="button" id="presetBtnSoftTissue" class="btn btn-sm btn-outline-secondary" title="Tejido">
+                        <i class="bi bi-activity"></i> Tejido
+                    </button>
+                </div>
+                <div id="mriPresets" class="btn-group-presets mt-1" role="group" style="display:none;">
+                    <button type="button" id="presetBtnAuto" class="btn btn-sm btn-outline-secondary" title="Auto">
+                        <i class="bi bi-magic"></i> Auto
+                    </button>
+                    <button type="button" id="presetBtnFullRange" class="btn btn-sm btn-outline-secondary" title="Rango Completo">
+                        <i class="bi bi-arrows-expand"></i> Rango Completo
+                    </button>
+                </div>
+
+                <input type="hidden" id="minInput" value="-160">
+                <input type="hidden" id="maxInput" value="240">
+                <div style="display:none;">
+                    <button id="minInput-minus"></button><button id="minInput-plus"></button>
+                    <button id="maxInput-minus"></button><button id="maxInput-plus"></button>
+                </div>
+            </div>
+          </div>
+
+          <div id="contrastEditorContainer" style="display: none;" class="animate-fade-in">
+            <div class="tool-panel-title"><i class="bi bi-graph-up"></i> Histograma</div>
+
+            <div id="curve-editor-wrapper" class="w-100 border border-secondary rounded position-relative bg-black mb-3" style="aspect-ratio: 1.7/1;">
+                <canvas id="histogramCanvas" class="position-absolute top-0 start-0 w-100 h-100"></canvas>
+                <canvas id="curveCanvas" class="position-absolute top-0 start-0 w-100 h-100" style="touch-action: none; cursor: crosshair;"></canvas>
+            </div>
+            
+            <div class="bg-secondary bg-opacity-25 p-3 rounded border border-secondary">
+                
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div class="text-muted font-monospace" style="font-size: 0.8rem;">
+                        <span class="me-2">x:<span id="pointXVal" class="text-light fw-bold font-monospace">-</span></span>
+                        <span>y:<span id="pointYVal" class="text-light fw-bold font-monospace">-</span></span>
+                        <span style="display:none;" id="pointIdVal"></span>
+                    </div>
+
+                    <div class="btn-group btn-group-sm">
+                        <button id="addPointBtn" class="btn btn-outline-success py-0 px-2" title="Añadir" style="height: 26px;">
+                            <i class="bi bi-plus-lg"></i>
+                        </button>
+                        <button id="removePointBtn" class="btn btn-outline-danger py-0 px-2" title="Borrar" style="height: 26px;">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <hr class="border-secondary my-2" style="opacity: 0.3;">
+
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div class="d-flex align-items-center gap-2">
+                        <label class="text-light mb-0" style="font-size: 0.8rem;">Umbral</label>
+                        <div class="input-group input-group-sm custom-spinner" style="width: 90px;">
+                            <button class="btn btn-outline-secondary py-0 px-1" id="cutoffInput-minus" style="height: 26px;">
+                                <i class="bi bi-dash"></i>
+                            </button>
+                            <input type="number" id="cutoffInput" class="form-control text-center bg-dark text-light border-secondary px-0" value="7.0" step="0.5" style="height: 26px; font-size: 0.85rem;">
+                            <button class="btn btn-outline-secondary py-0 px-1" id="cutoffInput-plus" style="height: 26px;">
+                                <i class="bi bi-plus"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="btn-group btn-group-sm">
+                            <button id="prevPointBtn" class="btn btn-outline-secondary py-0 px-2" style="height: 26px;"><i class="bi bi-chevron-left"></i></button>
+                            <button id="nextPointBtn" class="btn btn-outline-secondary py-0 px-2" style="height: 26px;"><i class="bi bi-chevron-right"></i></button>
+                    </div>
+                </div>
+                
+                <div class="d-flex justify-content-between align-items-center mt-2">
+                    <div class="form-check form-switch text-light mb-0">
+                        <input class="form-check-input" type="checkbox" id="logScaleCheckbox">
+                        <label class="form-check-label text-muted" for="logScaleCheckbox" style="font-size: 0.8rem;">Logarítmico</label>
+                    </div>
+                    
+                    <button id="resetContrastBtn" class="btn btn-sm btn-outline-warning py-0 px-3" title="Reiniciar" style="height: 26px;">
+                        <i class="bi bi-arrow-counterclockwise"></i>
+                    </button>
+                </div>
+            </div>
+          </div>
+      </div>
+    </div>
+
+    <div id="quadrant-grid-wrapper">
+      {% if success == 0 %}
+        <div class="d-flex h-100 align-items-center justify-content-center flex-column">
+          <h1 class="text-light mb-3"><i class="bi bi-images text-secondary" style="font-size: 4rem;"></i></h1>
+          <h3 class="text-light">No hay imagen cargada</h3>
+          <p class="text-muted">Ve a "Subir Imagen" para comenzar.</p>
+        </div>
+      {% else %}
+        <div id="quadrant-grid">
+          {% set views = [('axial', max_value_axial), ('sagital', max_value_sagital), ('coronal', max_value_coronal), ('3D', None)] %}
+          {% for view, max_val in views %}
+            <div id="card_{{ view }}" class="card bg-dark text-light border-secondary shadow-sm quadrant-card">
+              <div class="card-body p-2">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                  <h6 class="card-title mb-0 ms-2 text-uppercase small text-warning fw-bold">
+                      {% if view == '3D' %}<i class="bi bi-box"></i>{% else %}<i class="bi bi-layers"></i>{% endif %} 
+                      {{ view }}
+                  </h6>
+                  <button type="button" class="btn btn-sm btn-outline-light border-0" onclick="toggleFullscreen('card_{{ view }}')" title="Pantalla completa">
+                      <i class="bi bi-arrows-fullscreen"></i>
+                  </button>
+                </div>
+                
+                {% if view != '3D' %}
+                <div class="d-flex gap-2 align-items-center px-2 mb-1">
+                  <input type="range" id="slider_{{ view }}" min="0" max="{{ max_val }}" value="{{ max_val // 2 }}" class="form-range custom-range">
+                  <input type="number" id="number_{{ view }}" min="0" max="{{ max_val }}" value="{{ max_val // 2 }}" step="1" class="form-control form-control-sm bg-secondary text-light border-0 text-center" style="width: 60px;">
+                </div>
+                <div class="image-wrapper mt-1 bg-black rounded border border-secondary position-relative">
+                    <canvas id="canvas_{{ view }}"></canvas>
+                    <canvas id="overlay_{{ view }}" style="pointer-events:none;"></canvas>
+
+                    <div class="minimap-container" id="minimap_container_{{ view }}">
+                        <canvas class="minimap-canvas" id="minimap_canvas_{{ view }}" width="100" height="100"></canvas>
+                        <div class="minimap-viewport" id="minimap_viewport_{{ view }}"></div>
+                    </div>
+
+                    <!-- Anatomical Orientation Labels -->
+                    <div class="orientation-labels">
+                        {% if view == 'axial' %}
+                            <div class="orientation-label label-top">A</div>
+                            <div class="orientation-label label-bottom">P</div>
+                            <div class="orientation-label label-left">I</div>
+                            <div class="orientation-label label-right">D</div>
+                        {% elif view == 'sagital' %}
+                            <div class="orientation-label label-top">S</div>
+                            <div class="orientation-label label-bottom">Inf</div>
+                            <div class="orientation-label label-left">A</div>
+                            <div class="orientation-label label-right">P</div>
+                        {% elif view == 'coronal' %}
+                            <div class="orientation-label label-top">S</div>
+                            <div class="orientation-label label-bottom">Inf</div>
+                            <div class="orientation-label label-left">I</div>
+                            <div class="orientation-label label-right">D</div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% else %}
+                <div class="iframe-wrapper mt-1 bg-black rounded border border-secondary h-100">
+                  <iframe src="http://127.0.0.1:5010/panel" id="DicomRender" class="w-100 h-100" allowfullscreen></iframe>
+                </div>
+                {% endif %}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/viewer.js') }}"></script>
+
+<div class="modal fade" id="metadataModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content" style="background-color: var(--gris-panel); border: 1px solid var(--gris-borde); color: var(--gris-texto);">
+      
+      <div class="modal-header border-secondary">
+        <h5 class="modal-title text-light fw-bold">
+            <i class="bi bi-file-earmark-medical text-warning me-2"></i> Detalles del Estudio
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      
+      <div class="modal-body p-0">
+        <table class="table table-dark table-striped mb-0" style="font-size: 0.9rem;">
+            <tbody id="metadataTableBody">
+                <tr><td colspan="2" class="text-center text-muted py-3">Cargando información...</td></tr>
+            </tbody>
+        </table>
+      </div>
+      
+      <div class="modal-footer border-secondary p-2">
+        <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+      </div>
+      
+    </div>
+  </div>
+</div>
+
+{% endblock content %}
+{% endblock main_container %}
