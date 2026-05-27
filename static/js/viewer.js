@@ -217,9 +217,6 @@ document.addEventListener('DOMContentLoaded', function() {
         updateWWWC(ww, wc, 'fields');
     });
 
-    wwSlider?.addEventListener('input', () => updateWWWC(parseInt(wwSlider.value), parseInt(wcSlider.value), 'sliders'));
-    wcSlider?.addEventListener('input', () => updateWWWC(parseInt(wwSlider.value), parseInt(wcSlider.value), 'sliders'));
-    
     levelInput?.addEventListener('input', () => debouncedUpdateFromFields(parseInt(windowInput.value), parseInt(levelInput.value)));
     windowInput?.addEventListener('input', () => debouncedUpdateFromFields(parseInt(windowInput.value), parseInt(levelInput.value)));
     minInput?.addEventListener('input', () => {
@@ -1092,40 +1089,6 @@ document.addEventListener('DOMContentLoaded', function() {
         ctx.moveTo(0, y);
         ctx.lineTo(overlay.width, y);
         ctx.stroke();
-    }
-
-    function syncViews(sourceView, x, y) {
-        // DEPRECATED: Use syncViewsFromVoxel() instead
-        // This function uses pixel coordinates which don't account for aspect ratio
-        // Keeping for backward compatibility
-
-        let updates = {};
-
-        if (sourceView === 'axial') {
-            updates['sagital'] = x;
-            updates['coronal'] = y;
-        } else if (sourceView === 'coronal') {
-            updates['sagital'] = x;
-            updates['axial'] = y;
-        } else if (sourceView === 'sagital') {
-            updates['coronal'] = x;
-            updates['axial'] = y;
-        }
-
-        // Aplicar actualizaciones a los sliders
-        Object.keys(updates).forEach(targetView => {
-            const slider = document.getElementById(`slider_${targetView}`);
-            const number = document.getElementById(`number_${targetView}`);
-            if (slider) {
-                let val = Math.max(0, Math.min(updates[targetView], slider.max));
-
-                if (Math.abs(slider.value - val) > 0) {
-                    slider.value = val;
-                    number.value = val;
-                    updateImage(targetView, val, true);
-                }
-            }
-        });
     }
 
     function syncViewsFromVoxel(sourceView, voxel) {
@@ -2119,25 +2082,6 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (error) {
             tableBody.innerHTML = '<tr><td colspan="2" class="text-center text-danger">Error cargando información.</td></tr>';
             console.error(error);
-        }
-    }
-
-    // --- Lógica para iluminar botones de presets ---
-    // NOTE: ALL_PRESET_IDS is declared earlier in this file and includes MRI buttons.
-    function highlightPreset(activeId) {
-        ALL_PRESET_IDS.forEach(id => {
-            const btn = document.getElementById(id);
-            if (btn) {
-                btn.classList.remove('preset-active');
-                btn.classList.add('btn-outline-secondary');
-            }
-        });
-        if (activeId) {
-            const btn = document.getElementById(activeId);
-            if (btn) {
-                btn.classList.remove('btn-outline-secondary');
-                btn.classList.add('preset-active');
-            }
         }
     }
 

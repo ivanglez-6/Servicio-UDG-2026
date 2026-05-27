@@ -19,6 +19,8 @@
 9. [Session Management](#session-management)
 10. [File Structure](#file-structure)
 11. [Recent Architecture Changes & Fixes (2025-11-30)](#11-recent-architecture-changes--fixes)
+12. [Modality-Aware Visualization System](#12-modality-aware-visualization-system)
+13. [Standalone AI Research Tool (run_SWINUneTR.py)](#13-standalone-ai-research-tool)
 
 ---
 
@@ -495,10 +497,19 @@ POST /api/run_ai_segmentation
          │    │
          │    ├─→ Save as NIfTI (input_vol_native.nii.gz)
          │    │
-         │    ├─→ TorchIO preprocessing:
+         │    ├─→ ANTs preprocessing pipeline:
+         │    │    Reorient to RPI orientation
+         │    │    N4 Bias Field Correction (pass 1, shrink_factor=3)
+         │    │    Brain mask extraction (ants.get_mask — automatic)
+         │    │    Skull stripping (image × brain_mask)
+         │    │    Crop image to brain bounding box
+         │    │    N4 Bias Field Correction (pass 2, shrink_factor=2)
+         │    │    Save as ants_preprocessed.nii.gz (temp)
+         │    │
+         │    ├─→ TorchIO preprocessing (on ANTs output):
          │    │    Resample → 1.0mm isotropic
          │    │    CropOrPad → (160, 192, 160)
-         │    │    RescaleIntensity → [0, 1] (percentiles 0.1–99.9)
+         │    │    RescaleIntensity → [0, 1] (percentiles 0.1–99.9, non-zero mask)
          │    │
          │    ├─→ Swin-UNETR inference:
          │    │    Model: in_channels=1, out_channels=8, feature_size=24
@@ -509,6 +520,7 @@ POST /api/run_ai_segmentation
          │         Attach TorchIO affine to mask (nibabel)
          │         Resample to original DICOM geometry (SimpleITK, nearest neighbor)
          │         Save as MASK_FINAL_{timestamp}.nii.gz
+         │         Clean up all temp NIfTI files
          │
          ├─→ 4. MASK ALIGNMENT IN FLASK:
          │    │
@@ -600,8 +612,9 @@ POST /exportar_dicom
 | Method | Route | Purpose | Returns |
 |--------|-------|---------|---------|
 | GET | `/hu_value` | Get HU value at (x,y,z) | JSON: {voxel, hu, scales} |
-| GET | `/get_histogram` | Get volume histogram | JSON: {counts, bin_edges} |
+| GET | `/get_histogram` | Get volume histogram (modality-aware) | JSON: {counts, bin_edges, modality, segments} |
 | GET | `/get_dicom_metadata` | Get technical metadata | JSON |
+| GET | `/get_viewer_config` | Get modality + windowing config for frontend init | JSON: {modality, initial_wc, initial_ww, display_min, display_max} |
 | POST | `/update_render_mode` | Change 3D rendering mode/cmap | JSON status |
 | POST | `/upload_RT` | Upload RT Structure (.nrrd) | JSON status |
 
@@ -709,9 +722,12 @@ viewState = {
         sagittal: 1.0
     },
     colormap: 'gray',           // Active colormap for 2D views
-    lastVoxel: { x, y, z },    // Last inspector click (for crosshair persistence)
+    lastVoxel: { x, y, z },    // Last inspector click — NOTE: never written after init, crosshair persistence non-functional
     activeSegmentationId: null, // Currently selected segmentation layer
-    segmentations: []           // Cached list of {id, name, color, visible, has_undo}
+    segmentations: [],          // Cached list of {id, name, color, visible, has_undo}
+    modality: null,             // 'CT', 'MR', 'PT', etc. — set by fetchViewerConfig()
+    displayMin: -1024,          // Lower bound of actual data range (p0.5 percentile)
+    displayMax: 3071,           // Upper bound of actual data range (p99.5 percentile)
 }
 
 polygonState = {
@@ -750,10 +766,12 @@ contrastState = {
 
 **2. Window/Level Control**
 - Dual input: Sliders + numeric spinners
-- Presets: Lung (-600/1500), Bone (480/2500), Soft Tissue (40/400)
+- **CT presets** (shown only for CT modality): Lung (-600/1500), Bone (480/2500), Soft Tissue (40/400)
+- **MRI/other presets** (shown for non-CT): Auto (fetches backend percentile window), Full Range (p0.5–p99.5)
 - Debounced manual input (250ms delay)
 - Instant slider feedback
 - Active preset button highlighting with visual feedback
+- Preset panels toggled by `applyModalityUI()` on page load based on modality
 
 **3. Zoom & Pan**
 - Mouse wheel zoom (centered on cursor, 1.0× to 10.0×)
@@ -769,6 +787,9 @@ contrastState = {
 - Log scale toggle for visualization
 - Only applies LUT to grayscale pixels (preserves colored segmentation overlays)
 - Responsive canvas sizing via ResizeObserver
+- LUT range anchored to `display_min`/`display_max` from `/get_viewer_config` (not hardcoded ±1024)
+- CT bars colored by HU tissue type (air=dark, fat=yellow, soft tissue=red, bone=white); non-CT bars rendered in uniform gray
+- CT-specific anatomical segment counts shown only when modality is CT
 
 **5. 3D Inspector (Crosshair)**
 - Click or drag on any view
@@ -777,8 +798,9 @@ contrastState = {
   - Axial (x,y) → Sagittal[x], Coronal[y]
   - Coronal (x,y) → Sagittal[x], Axial[y]
   - Sagittal (x,y) → Coronal[x], Axial[y]
-- Crosshair persists across slice changes and image reloads (`drawCrosshairFromVoxel`)
-- Displays formatted HU value with voxel coordinates in Inspector panel
+- Crosshair persistence on slice change is implemented via `drawCrosshairFromVoxel` but is **non-functional** — `viewState.lastVoxel` is initialized to null and never written after inspector interactions
+- Inspector panel label adapts to modality: CT shows "Densidad: N UH", non-CT shows "Señal: N"
+- Displays formatted voxel coordinates (x, y, z) in Inspector panel
 
 **6. Colormap System**
 - Dropdown selector with 6 options: Escala de Grises, Hueso, Arcoiris (Jet), Térmico (Hot), Magma, Espectral
@@ -876,12 +898,14 @@ monai                     # Medical image analysis framework (SwinUNETR)
 torchio                   # Medical image preprocessing (Resample, CropOrPad)
 SimpleITK                 # DICOM series reading and resampling
 nibabel                   # NIfTI I/O for intermediate mask files
+ants                      # ANTs: N4 bias correction, brain masking, reorientation
 numpy                     # Array operations
 ```
 
 > **Note:** The AI plugin runs in its own Python environment (e.g., conda `medaimg`) because
-> its PyTorch/MONAI dependencies conflict with the Flask server's package versions.
-> The path to this environment's Python executable is currently **hardcoded** in `main.py:1249`.
+> its PyTorch/MONAI/ANTs dependencies conflict with the Flask server's package versions.
+> The executable is auto-discovered by `_find_medaimg_python()` (main.py:1306), which checks
+> the `MEDAIMG_PYTHON` env var, then common venv/conda paths. No hardcoded path.
 
 ### External Services
 1. **Bokeh Server** (Port 5010)
@@ -954,12 +978,15 @@ Servicio-Web-APP-2025/
 │   └── Session management
 │
 ├── plugin_ia_swin/         # AI Segmentation Microservice
-│   ├── run_ai_cli.py       # CLI entry point (~91 lines)
+│   ├── run_ai_cli.py       # CLI entry point (~116 lines)
 │   │   ├── DICOM → NIfTI conversion (SimpleITK)
-│   │   ├── TorchIO preprocessing pipeline
+│   │   ├── ANTs preprocessing (reorient, N4 ×2, brain mask, skull strip, crop)
+│   │   ├── TorchIO preprocessing (resample, rescale, crop/pad)
 │   │   ├── Swin-UNETR inference (MONAI)
-│   │   └── Native-space mask projection
-│   └── best_swin_unetr_model.pth  # Trained model weights
+│   │   └── Native-space mask projection (SimpleITK resampler)
+│   ├── best_swin_unetr_model.pth  # Trained model weights (~450 MB)
+│   ├── environment.yml            # Conda env spec (Linux/Windows)
+│   └── environment_macos.yml      # Conda env spec (macOS)
 │
 ├── templates/
 │   ├── home.html           # Base template (navbar, auth, layout)
@@ -984,6 +1011,10 @@ Servicio-Web-APP-2025/
 ├── upload_nrrd/            # RT Structure files (*.nrrd)
 ├── anonimizado/            # Temporary export folder + AI results
 │   └── AI_RESULTS/         # AI output masks and temp DICOM copies
+│
+├── run_SWINUneTR.py        # Standalone research script (NOT web-integrated)
+│   │                       # ANTs N4 + MNI152 registration + skull strip + TorchIO + Swin-UNETR
+│   │                       # Interactive file dialog (tkinter). Requires: ants, nilearn
 │
 ├── requirements.txt        # ~280 dependencies (Flask server)
 ├── ARCHITECTURE.md         # This document
@@ -1016,10 +1047,11 @@ Servicio-Web-APP-2025/
 - `export_segmentation` route - main.py:1090-1143
 
 **AI Plugin Integration:**
-- `ejecutar_ia_swin()` - main.py:1238-1275
-- `normalize_ai_mask()` - main.py:1277-1321
-- `api_run_ai_segmentation` route - main.py:1323-1425
-- AI CLI script - plugin_ia_swin/run_ai_cli.py:1-91
+- `_find_medaimg_python()` - main.py:1306-1328 (auto-discovers medaimg env)
+- `ejecutar_ia_swin()` - main.py:1330-1369
+- `normalize_ai_mask()` - main.py:1371-1415
+- `api_run_ai_segmentation` route - main.py:1417-1526
+- AI CLI script - plugin_ia_swin/run_ai_cli.py:1-116
 
 **Frontend Interactivity:**
 - Tool activation system - viewer.js:91-177
@@ -1626,6 +1658,144 @@ MAX_UPLOAD_SIZE=500M
 
 ---
 
+---
+
+## 12. Modality-Aware Visualization System
+
+The application automatically detects the imaging modality from DICOM metadata and adapts display parameters, presets, histogram rendering, and inspector labels accordingly.
+
+### 12.1. Backend Detection & Adaptive Windowing
+
+**Detection (process_dicom_folder, main.py:376):**
+```python
+series["Modality"] = str(getattr(dicom_data, 'Modality', 'CT'))
+```
+
+**Adaptive windowing strategy (process_selected_dicom, main.py:474-510):**
+```
+1. Compute percentile-based range from non-zero voxels:
+   display_min = p0.5   (lower display bound — excludes extreme outliers)
+   display_max = p99.5  (upper display bound)
+   auto_wc     = (p2 + p98) / 2
+   auto_ww     =  p98 - p2
+
+2. Select initial window (priority order):
+   Priority 1 — DICOM-embedded WindowCenter / WindowWidth tags (scanner recommendation)
+   Priority 2 — CT physics default: wc=40 HU, ww=400 HU (soft tissue)
+   Priority 3 — Percentile auto-window  (for MRI, PET, and other non-CT modalities)
+```
+
+Stored in session: `modality`, `initial_wc`, `initial_ww`, `display_min`, `display_max`.
+
+**Histogram (get_histogram, main.py:547-584):**
+- Uses `display_min`/`display_max` as histogram range (not hardcoded ±1024)
+- Anatomical segment counts (`Aire`, `Grasa`, `Tejido`, `Hueso`) returned **only if modality == 'CT'**
+
+### 12.2. Frontend Initialization Flow
+
+```
+PAGE LOAD
+    │
+    ▼
+fetchViewerConfig()  →  GET /get_viewer_config
+    │
+    ├── viewState.modality   = data.modality
+    ├── viewState.displayMin = data.display_min
+    ├── viewState.displayMax = data.display_max
+    ├── updateWWWC(initial_ww, initial_wc)       ← sets sliders to scanner defaults
+    ├── contrastState.minHU = display_min        ← anchors LUT editor to actual data range
+    ├── contrastState.maxHU = display_max
+    ├── computeAndUpdateLUT()
+    └── applyModalityUI()
+            │
+            ├── IF modality == 'CT':
+            │       show ctPresets  (Lung / Bone / Soft Tissue)
+            │       hide mriPresets
+            └── ELSE (MR, PET, …):
+                    hide ctPresets
+                    show mriPresets (Auto / Rango Completo)
+```
+
+### 12.3. Modality-Specific UI Differences
+
+| Feature | CT | MRI / Other |
+|---------|-----|-------------|
+| Preset panel | Lung, Bone, Soft Tissue | Auto (backend percentile), Full Range |
+| Inspector unit | "Densidad: N UH" | "Señal: N" |
+| Histogram bar color | HU tissue map (air=dark, fat=yellow, tissue=red, bone=white) | Uniform gray |
+| Histogram segments | Aire / Grasa / Tejido / Hueso counts | Not shown |
+| Initial WW/WC | DICOM tag → CT default (40/400) | DICOM tag → percentile auto-window |
+| LUT editor range | `display_min` to `display_max` | same |
+
+### 12.4. WindowCenter / WindowWidth Multi-Value Handling
+
+DICOM scanners sometimes embed multiple window presets as a list. The application always takes the first value:
+```python
+_wc = getattr(dicom_data, 'WindowCenter', None)
+series["WindowCenter"] = float(_wc[0]) if hasattr(_wc, '__len__') else float(_wc)
+```
+
+---
+
+## 13. Standalone AI Research Tool
+
+`run_SWINUneTR.py` is a **standalone research script** that is NOT integrated into the Flask web application. It provides a richer preprocessing pipeline for T1 MRI brain segmentation.
+
+### 13.1. Differences vs. Web App AI Pipeline
+
+| Step | Web App (`run_ai_cli.py`) | Standalone (`run_SWINUneTR.py`) |
+|------|--------------------------|----------------------------------|
+| Input | DICOM directory (CLI arg) | NIfTI or single DICOM (tkinter dialog) |
+| ANTs skull strip | `ants.get_mask()` (automatic) | MNI152 template registration + mask |
+| MNI registration | None | AffineFast to MNI152 (via nilearn) |
+| T1 detection | None | Keyword scan of filename, DICOM tags |
+| Output | `MASK_FINAL_{ts}.nii.gz` | `MASK_{name}.nii.gz` |
+| Integration | Invoked by Flask via subprocess | Interactive, run directly |
+| Extra deps | `ants` | `ants`, `nilearn`, `tkinter` |
+
+### 13.2. Standalone Pipeline
+
+```
+1. File selection (tkinter dialog — NIfTI or DICOM)
+        │
+        ├── NIfTI: validate 3D shape
+        └── DICOM: locate all slices of same SeriesInstanceUID
+                   reconstruct volume via SimpleITK
+                   save as tmp NIfTI
+
+2. T1 modality detection
+   Keyword scan: "t1", "mprage", "spgr", "bravo", … in filename + DICOM tags
+
+3. Load MNI152 template (nilearn.datasets.fetch_icbm152_2009)
+
+4. ANTs pipeline:
+   a. Reorient to RPI
+   b. N4 Bias Field Correction  (shrink_factor=3)
+   c. Affine registration to MNI152 template  (AffineFast)
+   d. Apply inverse transform to bring MNI mask into native space
+   e. Skull stripping: image × brain_mask
+   f. Crop to brain bounding box
+   g. N4 Bias Field Correction  (shrink_factor=2)
+
+5. TorchIO formatting:
+   Resample → 1.0mm isotropic
+   RescaleIntensity [0,1] (p0.1–p99.9, non-zero mask)
+   CropOrPad → (160, 192, 160)
+
+6. Swin-UNETR inference (identical model: in=1, out=8, feature_size=24)
+   Sliding window ROI 96³, overlap 0.5, gaussian blending
+
+7. Save mask as TorchIO LabelMap (preserves affine)
+   Output: MASK_{basename}.nii.gz in same directory as input
+```
+
+### 13.3. When to Use Each Tool
+
+- **Web app** (`run_ai_cli.py`): CT or MRI volumes served from the web interface; results injected as segmentation layers
+- **Standalone** (`run_SWINUneTR.py`): Research, batch offline processing of T1 MRI, when MNI-space registration fidelity is required
+
+---
+
 ## Known Issues & Technical Debt
 
 ### Issues Resolved (2025-11-30)
@@ -1647,10 +1817,10 @@ See [Section 11: Recent Architecture Changes & Fixes](#11-recent-architecture-ch
 8. **Magic Numbers**: HU thresholds (175, -200) hardcoded for bone/skin isosurface
 9. **Browser Compatibility**: Only tested on Chrome (likely)
 10. **Misleading Function Names**: `cssToPngPixels` returns internal pixel coords, not CSS coords (naming confusion)
-11. **Hardcoded AI Python Path**: `ejecutar_ia_swin()` uses `r"C:\Users\jesus\anaconda3\envs\medaimg\python.exe"` (Windows-only, single-machine)
-12. **Synchronous AI Inference**: `/api/run_ai_segmentation` blocks the entire Flask server during inference (30s–5min)
-13. **AI Mask Class Selection**: Only keeps the highest `argmax` class; no user control over which of the 8 classes to visualize
-14. **No AI Segmentation Refresh in Layer List**: AI result is injected with a string ID (`ai_swin_{timestamp}`) but the frontend `loadSegmentations()` expects integer IDs from the CRUD system
+11. ~~**Hardcoded AI Python Path**~~ ✅ **FIXED** — `_find_medaimg_python()` auto-discovers the `medaimg` environment via `MEDAIMG_PYTHON` env var or common venv/conda paths
+12. **Synchronous AI Inference**: `/api/run_ai_segmentation` blocks the entire Flask server during inference (30s–5min); ANTs preprocessing adds additional time before the neural network runs
+13. **AI Mask Class Selection**: All 8 classes injected as separate layers; no UI to toggle which classes to run or display; empty classes are skipped but non-brain-tissue classes may produce noise
+14. **Crosshair Persistence Non-Functional**: `drawCrosshairFromVoxel()` is called on every image reload but `viewState.lastVoxel` is never written after page load — crosshairs vanish on slice change
 
 ---
 
@@ -1662,7 +1832,7 @@ See [Section 11: Recent Architecture Changes & Fixes](#11-recent-architecture-ch
 3. Add Celery for async AI inference and DICOM processing
 4. Pre-generate slice tiles for faster scrubbing
 5. Add file upload size limits and validation
-6. Make AI Python path configurable (environment variable or config file)
+6. ~~Make AI Python path configurable~~ ✅ **DONE** via `_find_medaimg_python()` and `MEDAIMG_PYTHON` env var
 
 ### Medium Priority
 7. Implement DICOM C-STORE server (receive from PACS)
@@ -1670,7 +1840,7 @@ See [Section 11: Recent Architecture Changes & Fixes](#11-recent-architecture-ch
 9. Support DICOM-RT Plan files
 10. Add measurement tools (distance, area, volume)
 11. Export rendered 3D views as STL/OBJ
-12. Allow user selection of AI output classes (currently only highest class is kept)
+12. Add UI to selectively enable/disable which Swin-UNETR output classes to visualize (currently all 8 injected as separate layers)
 13. Add incremental undo stack (diff-based instead of full mask snapshots)
 
 ### Low Priority
@@ -1690,7 +1860,10 @@ This application is a **feature-rich medical imaging viewer** with impressive 3D
 - ✅ Fixed zoom interaction issues with HU Picker and 3D Inspector (2025-11-30)
 - ✅ Resolved coordinate mapping bugs with aspect ratio scaling (2025-11-30)
 - ✅ Added multi-layer segmentation system with brush, polygon, undo, and export
-- ✅ Integrated Swin-UNETR AI auto-segmentation via subprocess microservice
+- ✅ Integrated Swin-UNETR AI auto-segmentation with full ANTs preprocessing pipeline
+- ✅ Added modality-aware visualization (CT vs MRI adaptive windowing, presets, histogram)
+- ✅ AI environment auto-discovery via `_find_medaimg_python()` (cross-platform, no hardcoded path)
+- ✅ All 8 Swin-UNETR output classes injected as separate segmentation layers
 - ✅ Added colormap system (6 options) for 2D and 3D views
 - ✅ Added minimap navigation for zoomed views
 - ✅ Added anatomical orientation labels on all 2D views
@@ -1711,8 +1884,8 @@ This application is a **feature-rich medical imaging viewer** with impressive 3D
 - Memory-intensive session storage (amplified by segmentation masks + undo snapshots)
 - Missing production security features
 - No cleanup mechanisms for uploaded files or AI intermediates
-- Synchronous AI inference blocks the server
-- Hardcoded AI environment path (Windows-only)
+- Synchronous AI inference blocks the server (ANTs preprocessing + neural network = minutes)
+- Crosshair persistence broken (`viewState.lastVoxel` never updated after init)
 - Some misleading function/variable names (legacy code)
 
 **Best Use Cases:**
