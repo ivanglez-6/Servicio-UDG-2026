@@ -28,6 +28,10 @@ WEIGHTS_PATH = r"best_swin_unetr_model.pth"
 PATCH_SIZE    = (96, 96, 96)
 FEATURE_SIZE  = 24
 
+BASE_DIR     = os.path.dirname(os.path.abspath(__file__))
+MNI_TEMPLATE = os.path.join(BASE_DIR, "assets", "mni152", "mni_icbm152_t1_tal_nlin_sym_09a.nii.gz")
+MNI_MASK     = os.path.join(BASE_DIR, "assets", "mni152", "mni_icbm152_t1_tal_nlin_sym_09a_mask.nii.gz")
+
 # ─────────────────────────────────────────────
 #  DETECCION DE MODALIDAD (T1)
 # ─────────────────────────────────────────────
@@ -333,10 +337,8 @@ if __name__ == '__main__':
 
         # --- Template MNI ---
         print("\nCargando template MNI152...", end="", flush=True)
-        from nilearn import datasets
-        mni_dataset  = datasets.fetch_icbm152_2009()
-        mni_template = ants.image_read(mni_dataset['t1'])
-        mni_mask     = ants.image_read(mni_dataset['mask'])
+        mni_template = ants.image_read(MNI_TEMPLATE)
+        mni_mask     = ants.image_read(MNI_MASK)
         print(" OK")
 
         # --- Rutas de salida ---

@@ -11,6 +11,10 @@ from monai.inferers import sliding_window_inference
 
 warnings.filterwarnings("ignore")
 
+_BASE_DIR    = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MNI_TEMPLATE = os.path.join(_BASE_DIR, "assets", "mni152", "mni_icbm152_t1_tal_nlin_sym_09a.nii.gz")
+MNI_MASK     = os.path.join(_BASE_DIR, "assets", "mni152", "mni_icbm152_t1_tal_nlin_sym_09a_mask.nii.gz")
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True)
@@ -42,7 +46,16 @@ def main():
         img = ants.reorient_image2(img, orientation="RPI")
         img_n4 = ants.n4_bias_field_correction(img, shrink_factor=3)
 
-        brain_mask = ants.get_mask(img_n4)
+        mni_template = ants.image_read(MNI_TEMPLATE)
+        mni_mask_img = ants.image_read(MNI_MASK)
+        tx = ants.registration(fixed=mni_template, moving=img_n4, type_of_transform='AffineFast')
+        brain_mask = ants.apply_transforms(
+            fixed=img_n4,
+            moving=mni_mask_img,
+            transformlist=tx['fwdtransforms'],
+            whichtoinvert=[True],
+            interpolator='nearestNeighbor'
+        )
 
         img_stripped = img_n4 * brain_mask
         img_cropped = ants.crop_image(img_stripped, brain_mask)
