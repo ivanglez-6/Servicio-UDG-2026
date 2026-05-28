@@ -95,6 +95,39 @@ def _make_seg_color(index):
     r, g, b = colorsys.hsv_to_rgb(hue, 0.75, 0.90)
     return '#{:02X}{:02X}{:02X}'.format(int(r * 255), int(g * 255), int(b * 255))
 
+def _hex_to_nrrd_color(hex_color):
+    """Converts a #RRGGBB hex string to a space-separated RGB float string for .seg.nrrd headers."""
+    r = round(int(hex_color[1:3], 16) / 255, 6)
+    g = round(int(hex_color[3:5], 16) / 255, 6)
+    b = round(int(hex_color[5:7], 16) / 255, 6)
+    return f"{r} {g} {b}"
+
+def _nrrd_color_to_hex(color_str):
+    """Converts a space-separated RGB float string (0.0–1.0) to an uppercase #RRGGBB hex string."""
+    try:
+        parts = color_str.split()
+        if len(parts) != 3:
+            return "#AAAAAA"
+        r, g, b = int(round(float(parts[0]) * 255)), int(round(float(parts[1]) * 255)), int(round(float(parts[2]) * 255))
+        return '#{:02X}{:02X}{:02X}'.format(r, g, b)
+    except Exception:
+        return "#AAAAAA"
+
+def _merge_to_multilabel(segs, dims):
+    """Merges separate binary segmentation masks into a single multilabel uint8 array."""
+    multilabel = np.zeros(dims, dtype=np.uint8)
+    sorted_keys = sorted(segs.keys())
+    segment_info = []
+    for label_value, key in enumerate(sorted_keys, start=1):
+        seg = segs[key]
+        multilabel[seg['mask'] > 0] = label_value
+        segment_info.append({
+            'label_value': label_value,
+            'name': seg['name'],
+            'color_hex': seg.get('color', '#FFFFFF')
+        })
+    return multilabel, segment_info
+
 # Inicialización de Panel y Bokeh para la vista 3D
 pn.extension('vtk')
 bokeh_server_started = False
@@ -1259,6 +1292,24 @@ def export_segmentation():
                         filepath = os.path.join(tmpdir, f"{safe_name}.nrrd")
                         zipf.write(filepath, f"{safe_name}.nrrd")
                 return send_file(zip_path, as_attachment=True, download_name='segmentaciones.zip')
+        elif mode == 'multilabel':
+            if not segs:
+                return jsonify({"status": "error", "message": "No hay segmentaciones para exportar"}), 400
+            dims = user_data.get('dims')
+            multilabel_array, segment_info = _merge_to_multilabel(segs, dims)
+            header = {
+                'space': 'left-posterior-superior',
+                'kinds': ['domain', 'domain', 'domain'],
+                'space directions': [[dz, 0, 0], [0, dy, 0], [0, 0, dx]],
+                'space origin': origin
+            }
+            for N, info in enumerate(segment_info):
+                header[f"Segment{N}_Name"] = info['name']
+                header[f"Segment{N}_Color"] = _hex_to_nrrd_color(info['color_hex'])
+                header[f"Segment{N}_LabelValue"] = str(info['label_value'])
+            filepath = os.path.join(ANONIMIZADO_FOLDER, 'segmentaciones_multilabel.seg.nrrd')
+            nrrd.write(filepath, multilabel_array, header)
+            return send_file(filepath, as_attachment=True, download_name='segmentaciones_multilabel.seg.nrrd')
         else:
             # Active mode
             if active_id is None or active_id not in segs:
@@ -1273,6 +1324,74 @@ def export_segmentation():
 
     except Exception as e:
         return jsonify({"status": "error", "message": f"Export failed: {str(e)}"}), 500
+
+@app.route("/import_segmentation", methods=["POST"])
+def import_segmentation():
+    """Importa un archivo .seg.nrrd multilabel y restaura las capas de segmentación."""
+    user_data = get_user_data()
+    file = request.files.get("file")
+    if not file or file.filename == '':
+        return jsonify({"status": "error", "message": "No se seleccionó ningún archivo."}), 400
+    if not file.filename.lower().endswith('.nrrd'):
+        return jsonify({"status": "error", "message": "Solo se aceptan archivos .nrrd"}), 400
+    try:
+        filepath = os.path.join(UPLOAD_FOLDER_NRRD, file.filename)
+        file.save(filepath)
+        data_array, header_dict = nrrd.read(filepath)
+        flat = dict(header_dict)
+        flat.update(header_dict.get('keyvaluepairs', {}))
+
+        if "Segment0_LabelValue" not in flat:
+            return jsonify({"status": "error", "message": "Este archivo no es una segmentación exportada. Para RT Struct, usa el botón de carga correspondiente."}), 400
+
+        dims = user_data.get('dims')
+        if dims is None:
+            return jsonify({"status": "error", "message": "Carga un estudio DICOM antes de importar una segmentación."}), 400
+
+        parsed_segments = []
+        N = 0
+        while True:
+            if f"Segment{N}_LabelValue" not in flat:
+                break
+            label_value = int(flat[f"Segment{N}_LabelValue"])
+            name = flat.get(f"Segment{N}_Name", f"Segmentación {N + 1}")
+            color_str = flat.get(f"Segment{N}_Color", "0.667 0.667 0.667")
+            hex_color = _nrrd_color_to_hex(color_str)
+            parsed_segments.append({'label_value': label_value, 'name': name, 'color': hex_color})
+            N += 1
+
+        if not parsed_segments:
+            return jsonify({"status": "error", "message": "El archivo no contiene segmentaciones válidas."}), 400
+
+        Z, Y, X = dims
+        for entry in parsed_segments:
+            mask = (data_array == entry['label_value']).astype(np.uint8) * 255
+            if mask.shape != (Z, Y, X):
+                zoom_factors = (Z / mask.shape[0], Y / mask.shape[1], X / mask.shape[2])
+                mask = zoom(mask, zoom_factors, order=0)
+            entry['mask'] = mask
+
+        user_data['segmentations'] = {}
+        user_data['active_segmentation_id'] = None
+        first_slot = None
+        segs = user_data['segmentations']
+        for entry in parsed_segments:
+            slot = next(i for i in range(10000) if i not in segs)
+            segs[slot] = {
+                'name': entry['name'],
+                'mask': entry['mask'],
+                'color': entry['color'],
+                'visible': True,
+                'last_polygon_operation': None
+            }
+            if first_slot is None:
+                first_slot = slot
+        user_data['active_segmentation_id'] = first_slot
+
+        return jsonify({"status": "success"}), 200
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Error al importar: {str(e)}"}), 500
 
 @app.route('/anonimize')
 def anonimize():

@@ -42,7 +42,7 @@ This is a **medical imaging viewer and processing platform** that allows healthc
 - **Advanced image processing**: Histogram curve editing with real-time LUT, HU (Hounsfield Unit) measurements, zoom/pan with minimap
 - **Multi-user support**: Session-based data isolation
 - **RT Structure overlay**: Segmentation mask visualization in 2D and 3D (.nrrd files)
-- **Multi-layer segmentation**: Up to 5 named layers with brush, polygon, undo, and NRRD export
+- **Multi-layer segmentation**: Unlimited named layers with brush, polygon, undo, and NRRD export
 - **AI auto-segmentation**: Swin-UNETR neural network for automatic brain/organ segmentation (8-class output)
 
 ---
@@ -409,7 +409,7 @@ POST /create_segmentation { name: "Tumor" }
          │
          ├─→ Allocate:
          │    mask = np.zeros(dims, dtype=uint8)   # Full volume, same shape as DICOM
-         │    color = SEGMENTATION_COLORS[id]      # Cyan, GreenYellow, Orange, Magenta, Gold
+         │    color = SEGMENTATION_COLORS[id]      # Random generation
          │
          ├─→ Store in user_data['segmentations'][id]
          │

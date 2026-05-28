@@ -1739,6 +1739,86 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // Export multilabel segmentation button
+    const exportMultilabelSegBtn = document.getElementById('exportMultilabelSegBtn');
+    if (exportMultilabelSegBtn) {
+        exportMultilabelSegBtn.addEventListener('click', () => {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+            fetch('/export_segmentation', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                body: JSON.stringify({ mode: 'multilabel' })
+            })
+            .then(response => {
+                if (!response.ok) throw new Error('Export failed');
+                return response.blob();
+            })
+            .then(blob => {
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'segmentaciones_multilabel.seg.nrrd';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            })
+            .catch(error => { alert('Error al exportar: ' + error); });
+        });
+    }
+
+    // Import segmentation button — open file picker
+    const importSegBtn = document.getElementById('importSegBtn');
+    if (importSegBtn) {
+        importSegBtn.addEventListener('click', () => {
+            document.getElementById('importSegFileInput').click();
+        });
+    }
+
+    // Import segmentation file input — handle file selection and upload
+    const importSegFileInput = document.getElementById('importSegFileInput');
+    if (importSegFileInput) {
+        importSegFileInput.addEventListener('change', function () {
+            const file = this.files[0];
+            if (!file) return;
+            const confirmed = confirm('Importar esta segmentación reemplazará TODAS las capas actuales. ¿Deseas continuar?');
+            if (!confirmed) {
+                this.value = '';
+                return;
+            }
+            const formData = new FormData();
+            formData.append('file', file);
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+            const loader = document.getElementById('loader-wrapper');
+            if (loader) { loader.style.display = 'flex'; loader.style.opacity = '1'; }
+            importSegBtn.disabled = true;
+            fetch('/import_segmentation', {
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrfToken },
+                body: formData
+            })
+            .then(response => response.json().then(data => {
+                if (!response.ok) throw new Error(data.message);
+                return data;
+            }))
+            .then(data => {
+                loadSegmentations();
+                VIEWS.forEach(view => {
+                    const slider = document.getElementById('slider_' + view);
+                    updateImage(view, slider.value, true);
+                });
+                alert('Segmentación importada correctamente.');
+            })
+            .catch(error => { alert(error.message); })
+            .finally(() => {
+                if (loader) {
+                    loader.style.opacity = '0';
+                    setTimeout(() => { loader.style.display = 'none'; }, 500);
+                }
+                importSegBtn.disabled = false;
+                importSegFileInput.value = '';
+            });
+        });
+    }
+
     // Undo last polygon button
     const undoLastPolygonBtn = document.getElementById('undoLastPolygonBtn');
     if (undoLastPolygonBtn) {
