@@ -399,11 +399,7 @@
             <div id="card_{{ view }}" class="card bg-dark text-light border-secondary shadow-sm quadrant-card">
               <div class="card-body p-2">
                 <div class="d-flex justify-content-between align-items-center mb-1">
-                  <h6 class="card-title mb-0 ms-2 text-uppercase small text-warning fw-bold">
-                      {% if view == '3D' %}<i class="bi bi-box"></i>{% else %}<i class="bi bi-layers"></i>{% endif %} 
-                      {{ view }}
-                  </h6>
-                  <button type="button" class="btn btn-sm btn-outline-light border-0" onclick="toggleFullscreen('card_{{ view }}')" title="Pantalla completa">
+<button type="button" class="btn btn-sm btn-outline-light border-0" onclick="toggleFullscreen('card_{{ view }}')" title="Pantalla completa">
                       <i class="bi bi-arrows-fullscreen"></i>
                   </button>
                 </div>
