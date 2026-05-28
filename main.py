@@ -21,7 +21,7 @@ import numpy as np
 import time
 import shutil
 import nibabel as nib
-from scipy.ndimage import zoom
+from scipy.ndimage import zoom, label
 import subprocess
 import json
 import numpy.ma as ma
@@ -784,6 +784,85 @@ def toggle_volume_3d():
     if 'vtk_plotter' in user_data:
         update_3d_render(user_data, user_data.get('render_mode', 'isosurface'))
     return jsonify({"status": "success", "show_volume": new_value})
+
+
+@app.route("/analyze_components", methods=["POST"])
+def analyze_components():
+    user_data = get_user_data()
+    seg_id = int(request.json['seg_id'])
+    segs = user_data.get('segmentations', {})
+    if seg_id not in segs:
+        return jsonify({"message": "Segmentación no encontrada."}), 400
+    try:
+        mask = segs[seg_id]['mask']
+        if np.max(mask) == 0:
+            return jsonify({"total_components": 0, "top_components": [], "rest_count": 0, "rest_voxels": 0}), 200
+        binary = mask > 0
+        labeled_array, num_features = label(binary)
+        if num_features == 0:
+            return jsonify({"total_components": 0, "top_components": [], "rest_count": 0, "rest_voxels": 0}), 200
+        component_sizes = np.bincount(labeled_array.ravel())[1:]
+        unique_id = user_data.get('unique_id')
+        dx, dy, dz = _extract_spacing_for_series(unique_id, user_data)
+        voxel_mm3 = dx * dy * abs(dz)
+        sorted_indices = np.argsort(component_sizes)[::-1]
+        top_n = min(5, num_features)
+        top_components = []
+        for rank, idx in enumerate(sorted_indices[:top_n], start=1):
+            size = component_sizes[idx]
+            top_components.append({
+                "rank": rank,
+                "voxels": int(size),
+                "mm3": round(float(size) * voxel_mm3, 1)
+            })
+        rest_count = max(0, num_features - 5)
+        if num_features > 5:
+            rest_voxels = int(np.sum(component_sizes[sorted_indices[5:]]))
+        else:
+            rest_voxels = 0
+        return jsonify({
+            "total_components": num_features,
+            "top_components": top_components,
+            "rest_count": rest_count,
+            "rest_voxels": rest_voxels
+        }), 200
+    except Exception as e:
+        return jsonify({"message": f"Error al analizar: {str(e)}"}), 500
+
+
+@app.route("/clean_segmentation", methods=["POST"])
+def clean_segmentation():
+    user_data = get_user_data()
+    seg_id = int(request.json['seg_id'])
+    mode = request.json['mode']
+    segs = user_data.get('segmentations', {})
+    if seg_id not in segs:
+        return jsonify({"message": "Segmentación no encontrada."}), 400
+    mask = segs[seg_id]['mask']
+    try:
+        if np.max(mask) == 0:
+            return jsonify({"status": "success"}), 200
+        labeled_array, num_features = label(mask > 0)
+        if num_features <= 1:
+            return jsonify({"status": "success"}), 200
+        component_sizes = np.bincount(labeled_array.ravel())[1:]
+        if mode == "largest":
+            largest_label = int(np.argmax(component_sizes)) + 1
+            new_mask = np.where(labeled_array == largest_label, 255, 0).astype(np.uint8)
+            segs[seg_id]['mask'] = new_mask
+        elif mode == "threshold":
+            threshold_voxels = int(request.json['threshold_voxels'])
+            if threshold_voxels < 1:
+                threshold_voxels = 1
+            new_mask = np.zeros(mask.shape, dtype=np.uint8)
+            for i, size in enumerate(component_sizes):
+                if size >= threshold_voxels:
+                    new_mask[labeled_array == i + 1] = 255
+            segs[seg_id]['mask'] = new_mask
+        segs[seg_id]['last_polygon_operation'] = None
+        return jsonify({"status": "success"}), 200
+    except Exception as e:
+        return jsonify({"message": f"Error al limpiar: {str(e)}"}), 500
 
 
 @app.route('/image/<view>/<int:layer>')

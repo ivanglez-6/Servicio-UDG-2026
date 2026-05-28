@@ -1877,6 +1877,177 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    const cleanNoiseState = { segId: null, components: [], totalComponents: 0,
+                              restCount: 0, restVoxels: 0 };
+
+    const cleanNoiseModal = document.getElementById('cleanNoiseModal');
+    if (cleanNoiseModal) {
+        cleanNoiseModal.addEventListener('show.bs.modal', () => {
+            const cleanNoiseMaskSelect = document.getElementById('cleanNoiseMaskSelect');
+            const cleanNoiseResults = document.getElementById('cleanNoiseResults');
+            const cleanNoiseTotalCount = document.getElementById('cleanNoiseTotalCount');
+            const cleanNoiseTableBody = document.getElementById('cleanNoiseTableBody');
+            const cleanNoiseThreshold = document.getElementById('cleanNoiseThreshold');
+            const cleanNoiseFeedback = document.getElementById('cleanNoiseFeedback');
+            cleanNoiseMaskSelect.innerHTML = '';
+            viewState.segmentations.forEach(entry => {
+                const option = document.createElement('option');
+                option.value = entry.id;
+                option.textContent = entry.name;
+                if (entry.id === viewState.activeSegmentationId) option.selected = true;
+                cleanNoiseMaskSelect.appendChild(option);
+            });
+            cleanNoiseResults.style.display = 'none';
+            cleanNoiseTotalCount.textContent = '';
+            cleanNoiseTableBody.innerHTML = '';
+            cleanNoiseThreshold.value = '';
+            cleanNoiseFeedback.textContent = '';
+            cleanNoiseState.segId = null;
+            cleanNoiseState.components = [];
+            cleanNoiseState.totalComponents = 0;
+            cleanNoiseState.restCount = 0;
+            cleanNoiseState.restVoxels = 0;
+        });
+    }
+
+    const analyzeComponentsBtn = document.getElementById('analyzeComponentsBtn');
+    if (analyzeComponentsBtn) {
+        analyzeComponentsBtn.addEventListener('click', () => {
+            const cleanNoiseMaskSelect = document.getElementById('cleanNoiseMaskSelect');
+            const cleanNoiseResults = document.getElementById('cleanNoiseResults');
+            const cleanNoiseTotalCount = document.getElementById('cleanNoiseTotalCount');
+            const cleanNoiseTableBody = document.getElementById('cleanNoiseTableBody');
+            const segId = parseInt(cleanNoiseMaskSelect.value);
+            cleanNoiseState.segId = segId;
+            analyzeComponentsBtn.disabled = true;
+            analyzeComponentsBtn.textContent = 'Analizando...';
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+            fetch('/analyze_components', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                body: JSON.stringify({ seg_id: segId })
+            })
+            .then(response => response.json().then(data => {
+                if (!response.ok) throw new Error(data.message);
+                return data;
+            }))
+            .then(data => {
+                if (data.total_components === 0) {
+                    alert('La máscara está vacía.');
+                    return;
+                }
+                cleanNoiseState.components = data.top_components;
+                cleanNoiseState.totalComponents = data.total_components;
+                cleanNoiseState.restCount = data.rest_count;
+                cleanNoiseState.restVoxels = data.rest_voxels;
+                cleanNoiseTotalCount.textContent = `${data.total_components} componentes encontrados`;
+                cleanNoiseTableBody.innerHTML = '';
+                data.top_components.forEach(entry => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `<td>${entry.rank}</td><td>${entry.voxels.toLocaleString()}</td><td>${entry.mm3.toLocaleString()}</td>`;
+                    cleanNoiseTableBody.appendChild(tr);
+                });
+                if (data.rest_count > 0) {
+                    const tr = document.createElement('tr');
+                    tr.className = 'text-muted';
+                    tr.innerHTML = `<td>...</td><td>${data.rest_voxels.toLocaleString()} vóx. (${data.rest_count} comp.)</td><td>—</td>`;
+                    cleanNoiseTableBody.appendChild(tr);
+                }
+                cleanNoiseResults.style.display = '';
+            })
+            .catch(err => { alert('Error: ' + err.message); })
+            .finally(() => {
+                analyzeComponentsBtn.disabled = false;
+                analyzeComponentsBtn.innerHTML = '<i class="bi bi-diagram-3"></i> Analizar componentes';
+            });
+        });
+    }
+
+    const cleanNoiseThresholdEl = document.getElementById('cleanNoiseThreshold');
+    if (cleanNoiseThresholdEl) {
+        cleanNoiseThresholdEl.addEventListener('input', function() {
+            const cleanNoiseFeedback = document.getElementById('cleanNoiseFeedback');
+            const threshold = parseInt(this.value) || 0;
+            if (threshold <= 0 || cleanNoiseState.components.length === 0) {
+                cleanNoiseFeedback.textContent = '';
+                return;
+            }
+            let toRemoveFromTop = cleanNoiseState.components.filter(entry => entry.voxels < threshold).length;
+            let totalToRemove = toRemoveFromTop;
+            if (threshold > 1) totalToRemove += cleanNoiseState.restCount;
+            const toKeep = cleanNoiseState.totalComponents - totalToRemove;
+            cleanNoiseFeedback.textContent = `Se eliminarán ~${totalToRemove} componentes, quedarán ~${toKeep}.`;
+        });
+    }
+
+    const keepLargestBtn = document.getElementById('keepLargestBtn');
+    if (keepLargestBtn) {
+        keepLargestBtn.addEventListener('click', () => {
+            if (cleanNoiseState.segId === null) {
+                alert('Analiza primero una capa.');
+                return;
+            }
+            keepLargestBtn.disabled = true;
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+            fetch('/clean_segmentation', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                body: JSON.stringify({ seg_id: cleanNoiseState.segId, mode: 'largest' })
+            })
+            .then(response => response.json().then(data => {
+                if (!response.ok) throw new Error(data.message);
+                return data;
+            }))
+            .then(() => {
+                bootstrap.Modal.getInstance(document.getElementById('cleanNoiseModal')).hide();
+                VIEWS.forEach(view => {
+                    const slider = document.getElementById('slider_' + view);
+                    updateImage(view, slider.value, true, true);
+                });
+                refresh3D();
+            })
+            .catch(err => { alert('Error: ' + err.message); })
+            .finally(() => { keepLargestBtn.disabled = false; });
+        });
+    }
+
+    const applyThresholdBtn = document.getElementById('applyThresholdBtn');
+    if (applyThresholdBtn) {
+        applyThresholdBtn.addEventListener('click', () => {
+            if (cleanNoiseState.segId === null) {
+                alert('Analiza primero una capa.');
+                return;
+            }
+            const cleanNoiseThreshold = document.getElementById('cleanNoiseThreshold');
+            const threshold = parseInt(cleanNoiseThreshold.value) || 0;
+            if (threshold < 1) {
+                alert('Introduce un umbral mayor que cero.');
+                return;
+            }
+            applyThresholdBtn.disabled = true;
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+            fetch('/clean_segmentation', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                body: JSON.stringify({ seg_id: cleanNoiseState.segId, mode: 'threshold', threshold_voxels: threshold })
+            })
+            .then(response => response.json().then(data => {
+                if (!response.ok) throw new Error(data.message);
+                return data;
+            }))
+            .then(() => {
+                bootstrap.Modal.getInstance(document.getElementById('cleanNoiseModal')).hide();
+                VIEWS.forEach(view => {
+                    const slider = document.getElementById('slider_' + view);
+                    updateImage(view, slider.value, true, true);
+                });
+                refresh3D();
+            })
+            .catch(err => { alert('Error: ' + err.message); })
+            .finally(() => { applyThresholdBtn.disabled = false; });
+        });
+    }
+
     // Undo last polygon button
     const undoLastPolygonBtn = document.getElementById('undoLastPolygonBtn');
     if (undoLastPolygonBtn) {
