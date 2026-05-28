@@ -1285,6 +1285,27 @@ document.addEventListener('DOMContentLoaded', function() {
             .catch(err => console.error('loadSegmentations error:', err));
     }
 
+    function refresh3D() {
+        const iframe = document.getElementById('DicomRender');
+        if (!iframe) return;
+        iframe.style.opacity = '0.5';
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+        fetch('/refresh_3d', {
+            method: 'POST',
+            headers: { 'X-CSRFToken': csrfToken }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                iframe.src = iframe.src.split('?')[0] + '?t=' + new Date().getTime();
+            }
+        })
+        .catch(err => console.error(err))
+        .finally(() => {
+            setTimeout(() => { iframe.style.opacity = '1'; }, 1000);
+        });
+    }
+
     function renderSegmentationsList() {
         const countDisplay = document.getElementById('segCountDisplay');
         if (countDisplay) countDisplay.textContent = `${viewState.segmentations.length}`;
@@ -1394,6 +1415,7 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(() => {
             loadSegmentations();
             hideCreateSegmentationForm();
+            refresh3D();
         })
         .catch(err => { alert('Error: ' + err.message); })
         .finally(() => { if (saveBtn) saveBtn.disabled = false; });
@@ -1418,6 +1440,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 const slider = document.getElementById('slider_' + view);
                 if (slider) updateImage(view, parseInt(slider.value), true, true);
             });
+            refresh3D();
         })
         .catch(err => { alert('Error: ' + err.message); });
     }
@@ -1473,6 +1496,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 const slider = document.getElementById('slider_' + view);
                 if (slider) updateImage(view, parseInt(slider.value), true, true);
             });
+            refresh3D();
         })
         .catch(err => { alert('Error: ' + err.message); });
     }
@@ -1805,6 +1829,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     const slider = document.getElementById('slider_' + view);
                     updateImage(view, slider.value, true);
                 });
+                refresh3D();
                 alert('Segmentación importada correctamente.');
             })
             .catch(error => { alert(error.message); })
@@ -1816,6 +1841,39 @@ document.addEventListener('DOMContentLoaded', function() {
                 importSegBtn.disabled = false;
                 importSegFileInput.value = '';
             });
+        });
+    }
+
+    const toggleVolume3dBtn = document.getElementById('toggleVolume3dBtn');
+    if (toggleVolume3dBtn) {
+        toggleVolume3dBtn.addEventListener('click', () => {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+            toggleVolume3dBtn.disabled = true;
+            fetch('/toggle_volume_3d', {
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrfToken }
+            })
+            .then(response => response.json().then(data => {
+                if (!response.ok) throw new Error(data.message);
+                return data;
+            }))
+            .then(data => {
+                const icon = document.getElementById('toggleVolumeIcon');
+                const textNode = toggleVolume3dBtn.lastChild;
+                if (data.show_volume) {
+                    if (icon) icon.className = 'bi bi-eye';
+                    if (textNode) textNode.textContent = ' Ocultar volumen';
+                } else {
+                    if (icon) icon.className = 'bi bi-eye-slash';
+                    if (textNode) textNode.textContent = ' Mostrar volumen';
+                }
+                const iframe = document.getElementById('DicomRender');
+                if (iframe) {
+                    iframe.src = iframe.src.split('?')[0] + '?t=' + new Date().getTime();
+                }
+            })
+            .catch(err => { alert(err.message); })
+            .finally(() => { toggleVolume3dBtn.disabled = false; });
         });
     }
 

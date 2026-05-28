@@ -207,37 +207,34 @@ def update_3d_render(user_data, mode):
 
     plotter.clear()
 
-    if mode == 'isosurface':
-        try:
-            surface_bone = grid.contour([175]) 
-            surface_skin = grid.contour([-200]) 
-            plotter.add_mesh(surface_bone, color="white", smooth_shading=True, name="bone")
-            plotter.add_mesh(surface_skin, color="peachpuff", opacity=0.5, smooth_shading=True, name="skin")
-        except:
+    if user_data.get('show_volume_3d', True):
+        if mode == 'isosurface':
+            try:
+                surface_bone = grid.contour([175])
+                surface_skin = grid.contour([-200])
+                plotter.add_mesh(surface_bone, color="white", smooth_shading=True, name="bone")
+                plotter.add_mesh(surface_skin, color="peachpuff", opacity=0.5, smooth_shading=True, name="skin")
+            except:
+                plotter.add_volume(grid, cmap=current_cmap, opacity="linear", blending="composite")
+
+        elif mode == 'mip':
+            plotter.add_volume(grid, cmap=current_cmap, opacity="linear", blending="maximum")
+
+        elif mode == 'mip_inverted':
+            # Forzamos el mapa de color invertido si no lo está ya
+            cmap_inv = f"{current_cmap}_r" if not current_cmap.endswith('_r') else current_cmap
+            plotter.add_volume(grid, cmap=cmap_inv, opacity="linear", blending="maximum")
+        # ------------------------------------
+
+        else: # Volume
             plotter.add_volume(grid, cmap=current_cmap, opacity="linear", blending="composite")
-
-    elif mode == 'mip':
-        plotter.add_volume(grid, cmap=current_cmap, opacity="linear", blending="maximum")
-
-    elif mode == 'mip_inverted':
-        # Forzamos el mapa de color invertido si no lo está ya
-        cmap_inv = f"{current_cmap}_r" if not current_cmap.endswith('_r') else current_cmap
-        plotter.add_volume(grid, cmap=cmap_inv, opacity="linear", blending="maximum")
-    # ------------------------------------
-
-    else: # Volume
-        plotter.add_volume(grid, cmap=current_cmap, opacity="linear", blending="composite")
 
     # Re-dibujar RT Struct si existe (Lógica de Ivan intacta)
     if 'RT' in user_data and 'RT_aligned' in user_data:
         add_RT_to_plotter(user_data)
         
     # Re-dibujar Segmentación desde el sistema Multicapa
-    active_id = user_data.get('active_segmentation_id')
-    if active_id and 'segmentations' in user_data and active_id in user_data['segmentations']:
-        seg_mask = user_data['segmentations'][active_id]['mask']
-        if seg_mask is not None and np.any(seg_mask):
-            add_segmentation_to_plotter(user_data)
+    _add_all_segmentations_to_plotter(user_data)
 
     plotter.view_isometric()
     try:
@@ -300,52 +297,35 @@ def add_RT_to_plotter(user_data):
         print(error_msg)
         return False, error_msg
     
-def add_segmentation_to_plotter(user_data):
-    """
-    Convierte la máscara de segmentación en un objeto 3D flotante.
-    """
+def _add_all_segmentations_to_plotter(user_data):
     plotter = user_data.get('vtk_plotter')
     panel_vtk = user_data.get('vtk_panel')
     grid_full = user_data.get('grid_full')
-    seg_mask = None
-    active_id = user_data.get('active_segmentation_id')
-    if active_id and 'segmentations' in user_data and active_id in user_data['segmentations']:
-        seg_mask = user_data['segmentations'][active_id]['mask']
 
-    if not all([plotter, panel_vtk, grid_full is not None, seg_mask is not None]):
-        return False
+    if not plotter or not panel_vtk or grid_full is None:
+        return
 
-    try:
-        # Verificar matemáticamente que la máscara no esté vacía
-        if np.max(seg_mask) == 0:
-            print("ADVERTENCIA: La máscara 3D está vacía (puros ceros). No se renderizará.")
-            return False
+    segmentations = user_data.get('segmentations', {})
+    if not segmentations:
+        return
 
-        seg_dims = np.array(seg_mask.shape) + 1
+    for seg_id, seg_entry in segmentations.items():
+        if not seg_entry.get('visible', True):
+            continue
+        mask = seg_entry.get('mask')
+        if mask is None or np.max(mask) == 0:
+            continue
         seg_grid = pv.ImageData(
-            dimensions=seg_dims,
+            dimensions=np.array(mask.shape) + 1,
             spacing=grid_full.spacing,
             origin=grid_full.origin
         )
-
-        seg_grid.cell_data["values"] = seg_mask.flatten(order="F")
+        seg_grid.cell_data["values"] = mask.flatten(order="F")
         seg_grid = seg_grid.cell_data_to_point_data()
-
-        # Usamos 1.0 como contorno para asegurar que atrape cualquier valor detectado
         surface = seg_grid.contour([1.0])
-
         if surface.n_points == 0:
-            print("ADVERTENCIA: El contorno 3D no generó geometría.")
-            return False
-
-        # Opacity 1.0 para que sea una roca sólida color Cyan, imposible de perder de vista
-        plotter.add_mesh(surface, color="cyan", opacity=1.0, name="ia_segmentation", smooth_shading=True)
-        print(">>> Malla 3D Cyan agregada exitosamente al visor <<<")
-
-        return True
-    except Exception as e:
-        print(f"Error al renderizar segmentación de IA en 3D: {e}")
-        return False
+            continue
+        plotter.add_mesh(surface, color=seg_entry['color'], opacity=0.8, name=f"seg_{seg_id}", smooth_shading=True)
 
 def _extract_spacing_for_series(unique_id, user_data):
     """Calcula el espaciado entre píxeles (dx, dy, dz) de forma robusta."""
@@ -611,6 +591,7 @@ def process_selected_dicom():
     user_data['active_segmentation_id'] = None
     user_data['brush_size'] = 1
     user_data['paint_mode'] = 'paint'
+    user_data['show_volume_3d'] = True
 
     # --- CORRECCIÓN CLAVE: REGENERAR EL GRID 3D AQUÍ ---
     # En lugar de borrar 'vtk_panel_column', actualizamos 'grid_full'
@@ -782,8 +763,27 @@ def update_render_mode():
 
     if 'vtk_plotter' in user_data:
         update_3d_render(user_data, mode=new_mode)
-    
+
     return jsonify({"status": "success"})
+
+
+@app.route("/refresh_3d", methods=["POST"])
+def refresh_3d():
+    user_data = get_user_data()
+    if 'vtk_plotter' not in user_data:
+        return jsonify({"status": "no_plotter"})
+    update_3d_render(user_data, user_data.get('render_mode', 'isosurface'))
+    return jsonify({"status": "success"})
+
+
+@app.route("/toggle_volume_3d", methods=["POST"])
+def toggle_volume_3d():
+    user_data = get_user_data()
+    new_value = not user_data.get('show_volume_3d', True)
+    user_data['show_volume_3d'] = new_value
+    if 'vtk_plotter' in user_data:
+        update_3d_render(user_data, user_data.get('render_mode', 'isosurface'))
+    return jsonify({"status": "success", "show_volume": new_value})
 
 
 @app.route('/image/<view>/<int:layer>')
